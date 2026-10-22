@@ -1,0 +1,12 @@
+/build/
+/CMakeUserPresets.json
+/configs/local*.json
+# Runtime logs, including loose log files in the project root.
+/logs/
+/*.log
+/*.jsonl
+/.venv/
+__pycache__/
+*.py[cod]
+/.pytest_cache/
+

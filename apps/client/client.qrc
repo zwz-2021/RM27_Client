@@ -1,0 +1,7 @@
+<RCC>
+  <qresource prefix="/RM27/Client">
+    <file alias="Main.qml">qml/Main.qml</file>
+    <file alias="defaults.json">../../configs/defaults.json</file>
+  </qresource>
+</RCC>
+
