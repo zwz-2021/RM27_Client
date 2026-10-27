@@ -5,7 +5,7 @@
 
 namespace rm27::diagnostics {
 
-// Startup/shutdown only. Rotation and diagnostic export belong to T26.
+// 简单的单线程 JSONL 日志；由应用层决定日志文件的位置和生命周期。
 class JsonlLogger {
 public:
     bool open(const QString &path);
@@ -18,4 +18,3 @@ private:
 };
 
 } // namespace rm27::diagnostics
-

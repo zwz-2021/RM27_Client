@@ -1,4 +1,14 @@
 {
-  "mode": "simulation"
+  "mode": "simulation",
+  "window": {
+    "title": "RM27 Client - Simulation",
+    "width": 1280,
+    "height": 800
+  },
+  "simulation": {
+    "intervalMs": 1000
+  },
+  "logging": {
+    "directory": "D:/Competition/RM/RM27/code/RM27_Client/logs"
+  }
 }
-

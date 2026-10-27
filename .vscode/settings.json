@@ -2,39 +2,22 @@
   "VsCodeTaskButtons.showCounter": false,
   "VsCodeTaskButtons.tasks": [
     {
-      "label": "$(tools) build",
-      "tooltip": "选择 Debug 或 Release，直接执行 CMake 配置和构建",
+      "label": "$(tools) 构建",
+      "tooltip": "运行 build.ps1：配置并编译所选版本",
       "tasks": [
         { "label": "构建 Debug", "task": "RM27: Build Debug" },
         { "label": "构建 Release", "task": "RM27: Build Release" }
       ]
     },
     {
-      "label": "$(play) run",
-      "tooltip": "先构建，再启动客户端；不附加调试器",
+      "label": "$(play) 运行",
+      "tooltip": "运行 run.ps1：先增量构建，再启动客户端；不附加调试器",
       "tasks": [
         { "label": "Debug / 正式模式", "task": "RM27: Run Debug Official" },
         { "label": "Debug / 模拟模式", "task": "RM27: Run Debug Simulation" },
         { "label": "Release / 正式模式", "task": "RM27: Run Release Official" },
         { "label": "Release / 模拟模式", "task": "RM27: Run Release Simulation" }
       ]
-    },
-    {
-      "label": "$(beaker) test",
-      "tooltip": "依次执行构建、CTest 和 Python unittest",
-      "tasks": [
-        { "label": "测试 Debug", "task": "RM27: Test Debug" },
-        { "label": "测试 Release", "task": "RM27: Test Release" }
-      ]
-    },
-    {
-      "label": "$(server) simulator",
-      "tooltip": "直接使用指定 Python 启动模拟器，独立于客户端",
-      "tasks": [
-        { "label": "启动模拟器（Ctrl+C 退出）", "task": "RM27: Start Simulator" },
-        { "label": "检查入口并退出", "task": "RM27: Check Simulator" }
-      ]
     }
   ]
 }
-

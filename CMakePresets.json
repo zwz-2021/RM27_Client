@@ -1,56 +1,60 @@
 {
   "version": 3,
-  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
   "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}"
+    },
     {
       "name": "windows-mingw",
       "hidden": true,
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/${presetName}",
+      "inherits": "base",
       "environment": {
-        "RM27_QT_ROOT": "D:/Qt6/6.11.2/mingw_64",
-        "RM27_QT_TOOLS": "D:/Qt6/Tools",
-        "PATH": "$env{RM27_QT_ROOT}/bin;$env{RM27_QT_TOOLS}/mingw1310_64/bin;$penv{PATH}"
+        "PATH": "$env{RM27_QT_ROOT}/bin;$env{RM27_MINGW_ROOT}/bin;$env{RM27_NINJA_ROOT};$penv{PATH}"
       },
       "cacheVariables": {
         "CMAKE_PREFIX_PATH": "$env{RM27_QT_ROOT}",
-        "CMAKE_CXX_COMPILER": "$env{RM27_QT_TOOLS}/mingw1310_64/bin/g++.exe",
-        "CMAKE_MAKE_PROGRAM": "$env{RM27_QT_TOOLS}/Ninja/ninja.exe",
-        "BUILD_TESTING": "ON"
+        "CMAKE_CXX_COMPILER": "$env{RM27_MINGW_ROOT}/bin/g++.exe",
+        "CMAKE_MAKE_PROGRAM": "$env{RM27_NINJA_ROOT}/ninja.exe"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
       }
     },
     {
       "name": "windows-mingw-debug",
       "displayName": "Windows / Qt MinGW / Debug",
       "inherits": "windows-mingw",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
     },
     {
       "name": "windows-mingw-release",
       "displayName": "Windows / Qt MinGW / Release",
       "inherits": "windows-mingw",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
     }
   ],
-
   "buildPresets": [
-    { "name": "windows-mingw-debug", 
-      "configurePreset": "windows-mingw-debug" },
-    { "name": "windows-mingw-release", 
-      "configurePreset": "windows-mingw-release" }
-  ],
-  
-  "testPresets": [
     {
       "name": "windows-mingw-debug",
-      "configurePreset": "windows-mingw-debug",
-      "output": { "outputOnFailure": true }
+      "configurePreset": "windows-mingw-debug"
     },
     {
       "name": "windows-mingw-release",
-      "configurePreset": "windows-mingw-release",
-      "output": { "outputOnFailure": true }
+      "configurePreset": "windows-mingw-release"
     }
   ]
 }
-

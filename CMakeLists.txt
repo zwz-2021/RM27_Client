@@ -1,29 +1,25 @@
-#规定CMake版本最低为3.21
 cmake_minimum_required(VERSION 3.21)
-#声明工程名、版本和语言
 project(RM27Client VERSION 0.1.0 LANGUAGES CXX)
 
-#C++语言设置
-set(CMAKE_CXX_STANDARD 17) #语言标准为C++17
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-#普通c++编译器无法编译Qt在c++基础上实现的自己的moc
-set(CMAKE_AUTOMOC ON) #开启Qt的自动moc，在遇到需要moc处理的Qt宏时自动调用moc生成代码
-set(CMAKE_AUTORCC ON) #rcc配置qrc（一种xml文本），自动处理图片等资源，将资源嵌入.exe
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON) #生成compile_command.json给vscode读取分析
+# 源码与 QML 使用 UTF-8；MSVC 不依赖开发机器的系统代码页。
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2) #查找Qt6 并确保模块可用
-include(CTest) #加入CTest，使得BUILD_TESTING默认为ON
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2)
 
-# 将指定子目录加入当前 CMake 项目的构建过程，让 CMake 继续读取该子目录中的 CMakeLists.txt 文件
+# 依赖方向由各模块 target_link_libraries 明确声明。
 add_subdirectory(libs/domain)
 add_subdirectory(libs/config)
 add_subdirectory(libs/diagnostics)
+add_subdirectory(libs/application)
+add_subdirectory(libs/transport)
+add_subdirectory(libs/presentation)
 add_subdirectory(apps/client)
-
-if(BUILD_TESTING)
-    find_package(Qt6 REQUIRED COMPONENTS Test)
-    add_subdirectory(tests)
-endif()
-

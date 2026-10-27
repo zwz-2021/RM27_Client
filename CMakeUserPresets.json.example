@@ -1,0 +1,35 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "local-debug",
+      "inherits": "windows-mingw-debug",
+      "environment": {
+        "RM27_CMAKE_ROOT": "D:/Qt6/Tools/CMake_64",
+        "RM27_QT_ROOT": "D:/Qt6/6.11.2/mingw_64",
+        "RM27_MINGW_ROOT": "D:/Qt6/Tools/mingw1310_64",
+        "RM27_NINJA_ROOT": "D:/Qt6/Tools/Ninja"
+      }
+    },
+    {
+      "name": "local-release",
+      "inherits": "windows-mingw-release",
+      "environment": {
+        "RM27_CMAKE_ROOT": "D:/Qt6/Tools/CMake_64",
+        "RM27_QT_ROOT": "D:/Qt6/6.11.2/mingw_64",
+        "RM27_MINGW_ROOT": "D:/Qt6/Tools/mingw1310_64",
+        "RM27_NINJA_ROOT": "D:/Qt6/Tools/Ninja"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "local-debug",
+      "configurePreset": "local-debug"
+    },
+    {
+      "name": "local-release",
+      "configurePreset": "local-release"
+    }
+  ]
+}
