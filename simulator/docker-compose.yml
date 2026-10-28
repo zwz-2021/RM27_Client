@@ -1,0 +1,15 @@
+name: rm27-simulator
+
+services:
+  broker:
+    image: eclipse-mosquitto:2
+    ports:
+      - "127.0.0.1:${RM_SIM_MQTT_PORT:-3333}:1883"
+    volumes:
+      - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    healthcheck:
+      test: ["CMD", "mosquitto_pub", "-h", "127.0.0.1", "-p", "1883", "-t", "rm27/health", "-m", "ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    stop_grace_period: 5s

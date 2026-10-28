@@ -1,1 +1,1 @@
-"""RM27 standalone simulator entry point package."""
+"""Server modules. Importing the package does not start I/O."""
