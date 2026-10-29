@@ -18,6 +18,48 @@
         { "label": "Release / 正式模式", "task": "RM27: Run Release Official" },
         { "label": "Release / 模拟模式", "task": "RM27: Run Release Simulation" }
       ]
+    },
+    {
+      "label": "$(beaker) 裁判模拟器",
+      "tooltip": "独立 Python 裁判模拟器：安装、Broker、启动、检查与停止",
+      "tasks": [
+        {
+          "label": "安装 Python 依赖",
+          "task": "RM27 Simulator: Install"
+        },
+        {
+          "label": "只启动 Broker",
+          "task": "RM27 Simulator: Broker Only"
+        },
+        {
+          "label": "启动裁判模拟器",
+          "task": "RM27 Simulator: Start"
+        },
+        {
+          "label": "启动模拟器 + UDP 状态",
+          "task": "RM27 Simulator: Start UDP"
+        },
+        {
+          "label": "启动模拟器 + 视频",
+          "task": "RM27 Simulator: Start Video"
+        },
+        {
+          "label": "检查环境",
+          "task": "RM27 Simulator: Check"
+        },
+        {
+          "label": "检查运行状态",
+          "task": "RM27 Simulator: Check Runtime"
+        },
+        {
+          "label": "停止模拟器与自建 Broker",
+          "task": "RM27 Simulator: Stop"
+        },
+        {
+          "label": "停止模拟器，保留 Broker",
+          "task": "RM27 Simulator: Stop Keep Broker"
+        }
+      ]
     }
   ]
 }

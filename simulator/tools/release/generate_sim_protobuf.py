@@ -23,7 +23,7 @@ class GenerationError(RuntimeError):
 def build_command(project_root: Path, protoc: str) -> list[str]:
     proto_root = project_root / "protocol"
     canonical = proto_root / "robomaster.proto"
-    output_dir = project_root
+    output_dir = proto_root
     if not canonical.is_file():
         raise GenerationError("缺少 protocol/robomaster.proto")
     if not output_dir.is_dir():
@@ -42,9 +42,9 @@ def generate(project_root: Path, *, protoc: str | None = None) -> Path:
         raise GenerationError("找不到 protoc，请先安装 Protobuf 编译器")
 
     command = build_command(project_root, executable)
-    generated = project_root / "robomaster_pb2.py"
+    generated = project_root / "protocol/robomaster_pb2.py"
     if not generated.is_file():
-        raise GenerationError("缺少上游 robomaster_pb2.py，无法确认生成版本契约")
+        raise GenerationError("缺少 protocol/robomaster_pb2.py，无法确认生成版本契约")
     try:
         expected = parse_generated_runtime(generated)
     except RuntimeContractError as error:
@@ -79,7 +79,7 @@ def generate(project_root: Path, *, protoc: str | None = None) -> Path:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="从 protocol/robomaster.proto 生成模拟器 pb2"
+        description="从 protocol/robomaster.proto 生成 protocol/robomaster_pb2.py"
     )
     parser.add_argument(
         "--project-root",

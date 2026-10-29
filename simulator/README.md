@@ -1,14 +1,14 @@
 # 独立 RM26 裁判系统模拟器
 
-从 [ClearWei/RM26_Client 的 sim/](https://github.com/ClearWei/RM26_Client/tree/e291f2f65f5a5924509e4e2fe1b148ff9d4b24af/sim) 完整移植，固定上游 commit **e291f2f65f5a5924509e4e2fe1b148ff9d4b24af**，上游 Python 项目版本 `0.1.0`。来源及原文件 SHA-256 见 [UPSTREAM.json](UPSTREAM.json)，逐项迁移清单见 [MIGRATION.md](MIGRATION.md)，实际执行证据见 [VALIDATION.md](VALIDATION.md)。
+从 [ClearWei/RM26_Client 的 sim/](https://github.com/ClearWei/RM26_Client/tree/e291f2f65f5a5924509e4e2fe1b148ff9d4b24af/sim) 完整移植，固定上游 commit **e291f2f65f5a5924509e4e2fe1b148ff9d4b24af**，上游 Python 项目版本 `0.1.0`。完整脚本参数、运行模式及按钮用法见 [脚本命令说明书](scripts/README.md)。
 
-保留上游 Web 控制台、比赛状态管理、自动赛事演示、MQTT 发布及上行命令、UDP 状态/控制帧、HEVC UDP 图传、H.264 MQTT 工业相机、视频上传与选择、2026 Protobuf 及全部模拟器测试。这里运行的是上游独立模拟器业务，不使用 Qt 的 MockDataSource，不依赖客户端进程或构建产物。
+保留上游 Web 控制台、比赛状态管理、自动赛事演示、MQTT 发布及上行命令、UDP 状态/控制帧、HEVC UDP 图传、H.264 MQTT 工业相机、视频上传与选择、2026 Protobuf 及协议维护工具。这里运行的是上游独立模拟器业务，不使用 Qt 的 MockDataSource，不依赖客户端进程或构建产物。
 
 **协议范围是 RM26/2026 兼容快照，不声明支持 2027 正式协议。** 当前 RM27 Qt 客户端还没有外部通信接收实现；本目录完整提供测试对端，客户端后续接入后可联调。客户端原有内置预览模式保持原行为。
 
 ## 环境及首次安装
 
-Windows PowerShell 5.1 / PowerShell 7，Python **3.11+**。Docker Desktop（含 Compose v2）用于独立 Mosquitto；FFmpeg 用于真实 HEVC/H.264 视频。Node.js 18+ 与 protoc 仅用于相关验证/协议维护。这些依赖仅属于模拟器，不加入 Qt 的 CMake。
+Windows PowerShell 5.1 / PowerShell 7，Python **3.11+**。Docker Desktop（含 Compose v2）用于独立 Mosquitto；FFmpeg 用于真实 HEVC/H.264 视频。protoc用于协议生成和兼容检查。这些依赖仅属于模拟器，不加入 Qt 的 CMake。
 
 从 RM27_Client 根目录执行（脚本也支持从其他工作目录以绝对路径调用）：
 
@@ -62,15 +62,15 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\simulator\scripts\stop
 
 ## 独立 Broker 部署
 
-`docker-compose.yml` **仅有 Mosquitto 服务**，不包含 Qt 客户端、图形显示、音频或客户端构建。容器内部只监听 `1883`，宿主机默认仅映射 **127.0.0.1:3333 → 1883/TCP**。配置在 `docker/mosquitto.conf`。
+`docker/docker-compose.yml` **仅有 Mosquitto 服务**，不包含 Qt 客户端、图形显示、音频或客户端构建。容器内部只监听 `1883`，宿主机默认仅映射 **127.0.0.1:3333 → 1883/TCP**。配置在 `docker/mosquitto.conf`。
 
 不使用 Windows 管理脚本时，可手动部署：
 
 ```powershell
-docker compose -f simulator/docker-compose.yml -p rm27-simulator up -d broker
-docker compose -f simulator/docker-compose.yml -p rm27-simulator ps
+docker compose -f simulator/docker/docker-compose.yml -p rm27-simulator up -d broker
+docker compose -f simulator/docker/docker-compose.yml -p rm27-simulator ps
 # 手工启动的服务由调用者管理：
-docker compose -f simulator/docker-compose.yml -p rm27-simulator stop broker
+docker compose -f simulator/docker/docker-compose.yml -p rm27-simulator stop broker
 ```
 
 用 `RM_SIM_MQTT_PORT` 覆盖宿主端口（容器端口仍为1883）；Windows 启动器的 `-MqttPort` 会为本次 Compose 调用设置它。绑定地址固定为 loopback，不开放局域网。此 Broker 是本地匿名测试配置。
@@ -88,14 +88,14 @@ docker compose -f simulator/docker-compose.yml -p rm27-simulator stop broker
 
 UDP状态3333与UDP视频3334是不同用途；MQTT使用TCP3333，不能按相同payload解析。默认只用MQTT，不因Broker不可用而偷偷开启UDP。
 
-- `protocol/robomaster.proto`：唯一人工维护的2026 schema快照；`robomaster_pb2.py`：原上游生成文件。
+- `protocol/robomaster.proto`：唯一人工维护的2026 schema快照；`protocol/robomaster_pb2.py`：生成的Python消息，和schema统一放在协议包中，通过 `simulator.protocol.robomaster_pb2` 导入。原先空的 `server/proto/` 已移除；`server/protocol.py` 则仍用于UDP帧格式，两者职责不同。
 - `server/config.json`：模拟器自己的视频目录配置；相对路径以 `simulator/` 为基准。
 - `resources/videos/`：上传、本地视频及合成测试片段；不进入Git。
 - `tools/video_sender.py`：保留的独立HEVC发送工具，已修复原 `sim.server.hevc_annexb` 导入。
 - `GET /api/health`：协议模式、MQTT连接、当前视角和实例标识；Web“链路在线”只表示浏览器Socket.IO已连接。
 - `GET /api/state`：完整控制台状态；`POST /upload`：保留上传入口。
 
-## Python / Bash 入口
+## Python 入口
 
 激活模拟器环境后，在仓库根目录运行：
 
@@ -104,19 +104,16 @@ python -m simulator.server.main --check
 python -m simulator.server.main --mqtt-host 127.0.0.1 --mqtt-port 3333
 python -m simulator.server.main --enable-udp-sender
 python -m simulator.tools.video_sender simulator/resources/videos/testdemo.mp4 127.0.0.1 3334
-bash simulator/run_sim.sh --no-video
-bash simulator/run_sim.sh --video-file simulator/resources/videos/testdemo.mp4
 ```
 
-模块入口不自动部署Broker，适合已单独部署的环境。Bash入口保留原 `--no-video`、`--video-only`、`--video-file`、地址、端口、机器人视角及两个UDP开关，并已适配本目录工具、资源与Compose。Bash的视频相对路径以仓库根目录为基准；Windows脚本以模拟器目录为基准。
+模块入口不自动部署Broker，适合已单独部署的环境。Windows脚本会管理Broker及后台进程，脚本中的视频相对路径以模拟器目录为基准。
 
 ## 验证及协议维护
 
-以下命令使用 `simulator/.venv` 的 Python；完整发现包括 `simulator/tests/` 和上游相关 release 工具测试：
+以下命令使用 `simulator/.venv` 的 Python，运行当前保留的协议生成/兼容检查测试及独立通信冒烟：
 
 ```powershell
-.\simulator\.venv\Scripts\python.exe -m unittest discover -s simulator -t . -p "test_*.py" -v
-node --test simulator/tests/test_map_geometry.js
+.\simulator\.venv\Scripts\python.exe -m unittest discover -s simulator/tools/release/tests -t . -p "test_*.py" -v
 .\simulator\.venv\Scripts\python.exe -m simulator.tools.release.check_sim_protobuf_runtime
 
 # 安装可选测试依赖，不改变生产Broker部署：
@@ -129,7 +126,7 @@ node --test simulator/tests/test_map_geometry.js
 
 默认冒烟临时使用 AMQTT + 随机loopback端口验证真实MQTT协议收发，不是Mosquitto Docker验证或生产替代。外部Broker模式才针对实际部署的Mosquitto；工具会停止自己创建的临时服务并清理临时上传文件。
 
-兼容检查保留上游版本检查、两份依赖声明检查、pb2真实导入及重新编译descriptor语义比对，不仅检查能否import。需要改schema时，用与现有生成代码/依赖契约一致的protoc执行：
+兼容检查保留上游版本检查、两份依赖声明检查、pb2真实导入及重新编译descriptor语义比对，不仅检查能否import。需要改schema时，用与现有生成代码/依赖契约一致的protoc执行。生成器的输出目标已设为 `protocol/robomaster_pb2.py`，无需手动移动：
 
 ```powershell
 .\simulator\.venv\Scripts\python.exe -m simulator.tools.release.generate_sim_protobuf
@@ -140,4 +137,4 @@ node --test simulator/tests/test_map_geometry.js
 
 ## 许可证
 
-源码保留上游 [MIT](LICENSE)；Vue和Socket.IO许可证保留于 `server/static/vendor/`。地图素材保留原文件及上游授权证据，见 [素材来源](UPSTREAM_ASSET_LICENSES.md)、[上游第三方声明](UPSTREAM_THIRD_PARTY_NOTICES.md) 与 `licenses/upstream-public-assets.json`。代码的MIT许可不自动替代素材、商标各自的权利声明。
+源码保留上游 [MIT](LICENSE)；Vue和Socket.IO许可证保留于 `server/static/vendor/`。地图素材保留原文件及上游授权证据，见固定上游提交的 [素材来源](https://github.com/ClearWei/RM26_Client/blob/e291f2f65f5a5924509e4e2fe1b148ff9d4b24af/ASSET_LICENSES.md)、[第三方声明](https://github.com/ClearWei/RM26_Client/blob/e291f2f65f5a5924509e4e2fe1b148ff9d4b24af/THIRD_PARTY_NOTICES.md) 与本目录的 `licenses/upstream-public-assets.json`。代码的MIT许可不自动替代素材、商标各自的权利声明。

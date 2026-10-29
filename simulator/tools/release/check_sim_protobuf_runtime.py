@@ -388,7 +388,7 @@ def descriptors_equal(
 
 
 def audit_repository(project_root: Path) -> AuditResult:
-    generated_path = project_root / "robomaster_pb2.py"
+    generated_path = project_root / "protocol/robomaster_pb2.py"
     pyproject_path = project_root / "pyproject.toml"
     requirements_path = project_root / "requirements.txt"
     issues: list[RuntimeIssue] = []
@@ -475,7 +475,7 @@ def audit_repository(project_root: Path) -> AuditResult:
             issues.append(
                 RuntimeIssue(
                     "codegen:drift",
-                    "robomaster_pb2.py",
+                    "protocol/robomaster_pb2.py",
                     "提交的 Python 描述符不是由 canonical schema 生成",
                 )
             )

@@ -26,17 +26,18 @@ class SimulatorProtobufRuntimeTest(unittest.TestCase):
         )
         self.assertIsNotNone(result.runtime)
         self.assertFalse((PROJECT_ROOT / "robomaster.proto").exists())
+        self.assertFalse((PROJECT_ROOT / "robomaster_pb2.py").exists())
 
     def test_generated_module_is_really_imported(self) -> None:
         descriptor_name = check_sim_protobuf_runtime.import_generated_module(
-            PROJECT_ROOT / "robomaster_pb2.py"
+            PROJECT_ROOT / "protocol/robomaster_pb2.py"
         )
 
         self.assertEqual("robomaster.proto", descriptor_name)
 
     def test_generated_descriptor_matches_canonical_schema(self) -> None:
         generated = check_sim_protobuf_runtime.extract_generated_descriptor(
-            PROJECT_ROOT / "robomaster_pb2.py"
+            PROJECT_ROOT / "protocol/robomaster_pb2.py"
         )
         canonical = check_sim_protobuf_runtime.generate_canonical_descriptor(
             PROJECT_ROOT
@@ -48,7 +49,7 @@ class SimulatorProtobufRuntimeTest(unittest.TestCase):
 
     def test_descriptor_drift_is_detected(self) -> None:
         generated = check_sim_protobuf_runtime.extract_generated_descriptor(
-            PROJECT_ROOT / "robomaster_pb2.py"
+            PROJECT_ROOT / "protocol/robomaster_pb2.py"
         )
         canonical = descriptor_pb2.FileDescriptorProto()
         canonical.CopyFrom(generated)

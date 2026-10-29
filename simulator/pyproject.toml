@@ -25,7 +25,7 @@ test = ["amqtt>=0.11,<0.12", "requests", "websocket-client"]
 
 [tool.setuptools]
 packages = [
-    "simulator", "simulator.server", "simulator.server.proto", "simulator.tests",
+    "simulator", "simulator.server", "simulator.protocol",
     "simulator.tools", "simulator.tools.release", "simulator.tools.release.tests",
     "simulator.scripts",
 ]
@@ -33,8 +33,8 @@ package-dir = {simulator = "."}
 
 [tool.setuptools.package-data]
 simulator = [
-    "LICENSE", "*.md", "*.json", "docker-compose.yml", "run_sim.sh",
+    "LICENSE", "*.md", "*.json",
     "protocol/*.proto", "server/config.json", "server/static/*", "server/static/vendor/*",
-    "tests/*.js", "scripts/*.ps1", "scripts/*.py", "docker/*.conf",
+    "scripts/*.ps1", "scripts/*.py", "scripts/*.md", "docker/*.conf", "docker/*.yml",
     "resources/videos/README.md", "licenses/*",
 ]

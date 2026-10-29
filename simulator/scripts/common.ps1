@@ -4,7 +4,8 @@ $script:SimulatorRoot = Split-Path -Parent $PSScriptRoot
 $script:RepositoryRoot = Split-Path -Parent $script:SimulatorRoot
 $script:RuntimeRoot = Join-Path $script:SimulatorRoot '.runtime'
 $script:StatePath = Join-Path $script:RuntimeRoot 'state.json'
-$script:ComposeFile = Join-Path $script:SimulatorRoot 'docker-compose.yml'
+$script:ComposeRoot = Join-Path $script:SimulatorRoot 'docker'
+$script:ComposeFile = Join-Path $script:ComposeRoot 'docker-compose.yml'
 $script:VenvPython = Join-Path $script:SimulatorRoot '.venv\Scripts\python.exe'
 $script:ComposeProject = 'rm27-simulator'
 
@@ -176,7 +177,7 @@ function Invoke-SimulatorCompose([string[]]$ComposeArguments) {
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
         throw 'Docker is required to start the standalone broker. Install/start Docker Desktop or reuse an existing MQTT broker.'
     }
-    $result = & docker compose --project-directory $script:SimulatorRoot -f $script:ComposeFile `
+    $result = & docker compose --project-directory $script:ComposeRoot -f $script:ComposeFile `
         -p $script:ComposeProject @ComposeArguments
     if ($LASTEXITCODE -ne 0) { throw "Docker Compose failed: $($ComposeArguments -join ' ')" }
     return $result

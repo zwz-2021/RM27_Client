@@ -70,7 +70,7 @@ def check_environment():
     if sys.version_info < (3, 11):
         raise RuntimeError("Python 3.11 or newer is required")
     for name in ("fastapi", "socketio", "uvicorn", "multipart", "cv2", "numpy",
-                 "paho.mqtt.client", "simulator.robomaster_pb2", "simulator.server.app"):
+                 "paho.mqtt.client", "simulator.protocol.robomaster_pb2", "simulator.server.app"):
         importlib.import_module(name)
     root = Path(__file__).resolve().parents[1]
     for relative in ("protocol/robomaster.proto", "server/config.json", "tools/video_sender.py",

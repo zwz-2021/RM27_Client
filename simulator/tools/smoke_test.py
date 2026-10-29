@@ -84,7 +84,7 @@ def exercise_clients(base_url, mqtt_host, mqtt_port, video_directory):
     import paho.mqtt.client as mqtt
     import requests
     import socketio
-    from simulator import robomaster_pb2 as pb
+    from simulator.protocol import robomaster_pb2 as pb
 
     session = requests.Session()
     session.trust_env = False

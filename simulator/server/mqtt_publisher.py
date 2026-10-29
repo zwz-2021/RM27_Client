@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from paho.mqtt.client import Client as MQTTClient  # type: ignore
 
 # Preserved RM26 protocol messages; no external sim/ import or sys.path mutation.
-from .. import robomaster_pb2 as pb
+from ..protocol import robomaster_pb2 as pb
 
 
 class MQTTPublisher:
