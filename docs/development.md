@@ -1,5 +1,7 @@
 # 本地开发
 
+第一次参与本项目、希望按步骤与 Codex 完成开发时，先阅读 [通俗版开发路线](development-roadmap.md)。下面主要供查询构建、启动和配置方法。
+
 项目使用 Qt Quick / C++17，只保留本地构建和运行流程，不要求 CI/CD、CTest 或 Qt Test。
 
 ## Windows / Qt MinGW：首次配置
