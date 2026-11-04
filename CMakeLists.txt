@@ -14,9 +14,12 @@ if(MSVC)
 endif()
 
 find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2)
+include(cmake/Protobuf.cmake)
+include(CTest)
 
 # 依赖方向由各模块 target_link_libraries 明确声明。
 add_subdirectory(libs/domain)
+add_subdirectory(libs/protocol)
 add_subdirectory(libs/config)
 add_subdirectory(libs/diagnostics)
 add_subdirectory(libs/application)

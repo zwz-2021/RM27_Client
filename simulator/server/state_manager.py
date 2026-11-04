@@ -18,6 +18,7 @@
 
 import time
 import threading
+import math
 from datetime import datetime
 
 class StateManager:
@@ -26,7 +27,9 @@ class StateManager:
     SCORE_MIN = 0
     SCORE_MAX = 999
     ECONOMY_MIN = 0
-    ECONOMY_MAX = 100000
+    ECONOMY_MAX = 4294967295
+    # Appendix 2 IDs; robot_health on MQTT is a separate, documented 8-item view.
+    BASIC_ROBOT_IDS = (1, 3, 4, 5, 6, 7, 101, 103, 104, 105, 106, 107)
     TEAM_NAMES = ("red", "blue")
     FORTRESS_CAPTURE_DURATION_SEC = 20
 
@@ -134,14 +137,9 @@ class StateManager:
         # 机器人位置 (x, y, 角度) - 归一化 0.0 到 1.0 还是米?
         # 协议使用米。地图通常为 28m x 15m。
         self.positions = [
-            {"x": 2.0, "y": 2.0, "angle": 0.0},   # 红方 1
-            {"x": 5.0, "y": 2.0, "angle": 0.0},   # 红方 3
-            {"x": 8.0, "y": 2.0, "angle": 0.0},   # 红方 6
-            {"x": 11.0, "y": 2.0, "angle": 0.0},  # 红方 7
-            {"x": 17.0, "y": 10.0, "angle": 180.0}, # 蓝方 101
-            {"x": 20.0, "y": 10.0, "angle": 180.0}, # 蓝方 103
-            {"x": 23.0, "y": 10.0, "angle": 180.0}, # 蓝方 106
-            {"x": 26.0, "y": 10.0, "angle": 180.0}, # 蓝方 107
+            {"x": 2.0 + (index % 6) * 2.0, "y": 2.0 if rid < 100 else 10.0,
+             "angle": 0.0 if rid < 100 else 180.0}
+            for index, rid in enumerate(self.BASIC_ROBOT_IDS)
         ]
         self._initial_positions = [dict(position) for position in self.positions]
         self._match_simulation_clock_active = False
@@ -167,14 +165,16 @@ class StateManager:
 
         # --- 复活相关 ---
         # 机器人 ID 顺序与 robot_health 列表索引保持一致
-        default_robot_count = len(self.global_unit_status.get("robot_health", []))
-        # 机器人 ID 列表：默认使用当前模拟器重点联调的 8 台机器人
-        # 红方: 1/3/6/7，蓝方: 101/103/106/107
-        if default_robot_count == 8:
-            self.robot_ids = [1, 3, 6, 7, 101, 103, 106, 107]
-        else:
-            # 兜底使用从 1 开始的连续 ID
-            self.robot_ids = list(range(1, default_robot_count + 1))
+        self.robot_ids = list(self.BASIC_ROBOT_IDS)
+        self.robot_static_by_id = {}
+        self.robot_dynamic_by_id = {}
+        for rid in self.robot_ids:
+            self.current_robot_id = rid
+            self.robot_static_by_id[rid] = self._create_robot_static_status_state()
+            self.robot_dynamic_by_id[rid] = self._create_robot_dynamic_status_state()
+        self.current_robot_id = 1
+        self.robot_static_status = self.robot_static_by_id[1]
+        self.robot_dynamic_status = self.robot_dynamic_by_id[1]
 
         self.robot_injury_stats = {
             rid: self._empty_robot_injury_stat() for rid in self.robot_ids
@@ -234,6 +234,8 @@ class StateManager:
             "stage_countdown_sec": 300,
             "stage_elapsed_sec": 0,
             "is_paused": False,
+            "game_result": 255,
+            "end_reason": 255,
         }
 
     @staticmethod
@@ -305,6 +307,7 @@ class StateManager:
             "field_state": 0,
             "alive_state": 1,
             "robot_id": int(self.current_robot_id or 1),
+            # P-003 user-designated RM26 simulator convention, renamed by RM27 IDs.
             "robot_type": int(self.current_robot_id or 1) % 100,
             "performance_system_shooter": 1,
             "performance_system_chassis": 1,
@@ -323,7 +326,7 @@ class StateManager:
             "current_health": 600,
             "current_heat": 0.0,
             "last_projectile_fire_rate": 0.0,
-            "current_chassis_energy": 0,
+            "reserved": 0,
             "current_buffer_energy": 0,
             "current_experience": 100,
             "experience_for_upgrade": 1000,
@@ -414,7 +417,7 @@ class StateManager:
         return {
             "base_health": 5000,
             "base_status": 0,
-            "base_shield": 1000,
+            "base_shield": 1,
             "outpost_health": 1500,
             "outpost_status": 1,
             # --- 分队伍数据 ---
@@ -422,26 +425,28 @@ class StateManager:
             "blue_base_health": 5000,
             "red_base_status": 0,
             "blue_base_status": 0,
-            "red_base_shield": 1000,
-            "blue_base_shield": 1000,
+            "red_base_shield": 1,
+            "blue_base_shield": 1,
             "red_outpost_health": 1500,
             "blue_outpost_health": 1500,
             "red_outpost_status": 1,
             "blue_outpost_status": 1,
             "red_outpost_destroyed": False,
             "blue_outpost_destroyed": False,
-            "robot_health": [600] * 8, # 8 个机器人
-            "robot_max_hp": [600] * 8, # 8 个机器人最大血量
-            "robot_bullets": [0] * 8,
-            "robot_heat": [0] * 8,
-            "robot_heat_manual_hold": [False] * 8,
-            "robot_fire_rate": [0] * 8,
-            "robot_speed_over_limit": [False] * 8,
-            "robot_power_over_limit": [False] * 8,
-            "robot_level": [1] * 8,
-            "robot_power": [0] * 8,
+            "robot_health": [600] * 12,
+            "robot_max_hp": [600] * 12,
+            "robot_bullets": [0] * 12,
+            "robot_heat": [0.0] * 12,
+            "robot_heat_manual_hold": [True] * 12,
+            "robot_fire_rate": [0.0] * 12,
+            "robot_speed_over_limit": [False] * 12,
+            "robot_power_over_limit": [False] * 12,
+            "robot_level": [1] * 12,
+            "robot_power": [0] * 12,
             "total_damage_red": 0,
-            "total_damage_blue": 0
+            "total_damage_blue": 0,
+            "total_CP_red": 0,
+            "total_CP_blue": 0,
         }
 
     def _get_robot_fire_rate_limit(self, robot_id):
@@ -1006,7 +1011,7 @@ class StateManager:
             self.global_unit_status["robot_health"][i] = int(self.global_unit_status["robot_max_hp"][i])
             self.global_unit_status["robot_bullets"][i] = 0
             self.global_unit_status["robot_heat"][i] = 0
-            self.global_unit_status["robot_heat_manual_hold"][i] = False
+            self.global_unit_status["robot_heat_manual_hold"][i] = True
             self.global_unit_status["robot_fire_rate"][i] = 0
             self.global_unit_status["robot_speed_over_limit"][i] = False
             self.global_unit_status["robot_power_over_limit"][i] = False
@@ -1014,15 +1019,15 @@ class StateManager:
             self.global_unit_status["robot_power"][i] = 0
         self.global_unit_status["base_health"] = 5000
         self.global_unit_status["base_status"] = 0
-        self.global_unit_status["base_shield"] = 1000
+        self.global_unit_status["base_shield"] = 1
         self.global_unit_status["outpost_health"] = 1500
         self.global_unit_status["outpost_status"] = 1
         self.global_unit_status["red_base_health"] = 5000
         self.global_unit_status["blue_base_health"] = 5000
         self.global_unit_status["red_base_status"] = 0
         self.global_unit_status["blue_base_status"] = 0
-        self.global_unit_status["red_base_shield"] = 1000
-        self.global_unit_status["blue_base_shield"] = 1000
+        self.global_unit_status["red_base_shield"] = 1
+        self.global_unit_status["blue_base_shield"] = 1
         self.global_unit_status["red_outpost_health"] = 1500
         self.global_unit_status["blue_outpost_health"] = 1500
         self.global_unit_status["red_outpost_status"] = 1
@@ -1092,6 +1097,15 @@ class StateManager:
         }
         self.pending_game_result_reason = ""
         self.pending_game_result_end_reason = 255
+        self.game_status["game_result"] = 255
+        self.game_status["end_reason"] = 255
+        saved_robot_id = self.current_robot_id
+        for rid in self.robot_ids:
+            self.current_robot_id = rid
+            self.robot_static_by_id[rid] = self._create_robot_static_status_state()
+            self.robot_dynamic_by_id[rid] = self._create_robot_dynamic_status_state()
+        self.current_robot_id = saved_robot_id
+        self._sync_basic_robot_locked()
         # 重置 respawn 状态
         for rid, info in self.respawn_info.items():
             info.update({
@@ -1311,10 +1325,76 @@ class StateManager:
         with self.lock:
             return dict(self.robot_performance_selection_sync)
 
+    def _sync_basic_robot_locked(self):
+        """All console and wire views read the same selected robot values."""
+        rid = int(self.current_robot_id)
+        index = self.robot_ids.index(rid)
+        self.robot_static_status = self.robot_static_by_id[rid]
+        self.robot_dynamic_status = self.robot_dynamic_by_id[rid]
+        self.robot_static_status.update({
+            "robot_id": rid, "robot_type": rid % 100,
+            "level": self.global_unit_status["robot_level"][index],
+            "max_health": self.global_unit_status["robot_max_hp"][index],
+        })
+        self.robot_dynamic_status.update({
+            "current_health": self.global_unit_status["robot_health"][index],
+            "current_heat": self.global_unit_status["robot_heat"][index],
+            "last_projectile_fire_rate": self.global_unit_status["robot_fire_rate"][index],
+            "reserved": 0,
+        })
+
+    def select_robot(self, robot_id):
+        rid = int(robot_id)
+        if rid not in self.robot_ids:
+            raise ValueError("当前基础数据支持的机器人编号中不存在此编号")
+        with self.lock:
+            self.current_robot_id = rid
+            self._sync_basic_robot_locked()
+
+    @staticmethod
+    def _check_basic_uint(value, name, maximum=4294967295):
+        try:
+            integer = int(value)
+        except (TypeError, ValueError, OverflowError) as error:
+            raise ValueError(f"{name} 必须是协议范围内的整数") from error
+        decimal_string = isinstance(value, str) and value.isascii() and value.isdecimal()
+        if (isinstance(value, bool) or (isinstance(value, str) and not decimal_string)
+                or (not isinstance(value, str) and integer != value)
+                or not 0 <= integer <= maximum):
+            raise ValueError(f"{name} 必须是 0～{maximum} 的整数")
+        return integer
+
+    @classmethod
+    def _check_basic_status_fields(cls, source, uint_fields, float_fields):
+        """Validate migrated entry points before touching the shared state."""
+        for key in uint_fields:
+            if key in source:
+                cls._check_basic_uint(source[key], key)
+        for key in float_fields:
+            if key not in source:
+                continue
+            try:
+                value = float(source[key])
+            except (TypeError, ValueError, OverflowError) as error:
+                raise ValueError(f"{key} 必须是有限的非负 float32 数值") from error
+            if (isinstance(source[key], bool) or not math.isfinite(value)
+                    or not 0 <= value <= 3.4028234663852886e38):
+                raise ValueError(f"{key} 必须是有限的非负 float32 数值")
+
     def set_robot_static_status(self, payload=None):
+        source = dict(payload or {})
+        self._check_basic_status_fields(source, (
+            "connection_state", "field_state", "alive_state", "robot_id", "robot_type",
+            "performance_system_shooter", "performance_system_chassis", "level",
+            "max_health", "max_heat", "max_power", "max_buffer_energy", "max_chassis_energy",
+        ), ("heat_cooldown_rate",))
         with self.lock:
             current_robot_id = int(self.current_robot_id or 1)
-            normalized = self._create_robot_static_status_state()
+            expected_type = current_robot_id % 100
+            if "robot_type" in source and int(source["robot_type"]) != expected_type:
+                raise ValueError(f"机器人类型与当前编号不匹配：{current_robot_id} 的类型应为 {expected_type}")
+            self._sync_basic_robot_locked()
+            normalized = dict(self.robot_static_status)
             source = dict(payload or {})
             normalized["connection_state"] = self._normalize_robot_status_uint(
                 source.get("connection_state", normalized["connection_state"]), 1
@@ -1325,13 +1405,8 @@ class StateManager:
             normalized["alive_state"] = self._normalize_robot_status_uint(
                 source.get("alive_state", normalized["alive_state"]), 1
             )
-            normalized["robot_id"] = self._normalize_robot_status_uint(
-                source.get("robot_id", current_robot_id), current_robot_id, 1
-            )
-            normalized["robot_type"] = self._normalize_robot_status_uint(
-                source.get("robot_type", normalized["robot_id"] % 100),
-                normalized["robot_id"] % 100,
-            )
+            normalized["robot_id"] = current_robot_id
+            normalized["robot_type"] = expected_type
             normalized["performance_system_shooter"] = self._normalize_robot_status_uint(
                 source.get("performance_system_shooter", normalized["performance_system_shooter"]),
                 1,
@@ -1362,16 +1437,27 @@ class StateManager:
                 source.get("max_chassis_energy", normalized["max_chassis_energy"]), 120
             )
             self.robot_static_status = normalized
+            self.robot_static_by_id[current_robot_id] = normalized
+            index = self.robot_ids.index(current_robot_id)
+            self.global_unit_status["robot_level"][index] = normalized["level"]
+            self.global_unit_status["robot_max_hp"][index] = normalized["max_health"]
             self.log("Referee", f"Set RobotStaticStatus: {normalized}")
             return dict(self.robot_static_status)
 
     def get_robot_static_status(self):
         with self.lock:
+            self._sync_basic_robot_locked()
             return dict(self.robot_static_status)
 
     def set_robot_dynamic_status(self, payload=None):
+        source = dict(payload or {})
+        self._check_basic_status_fields(source, (
+            "current_health", "reserved", "current_buffer_energy", "current_experience",
+            "experience_for_upgrade", "total_projectiles_fired", "remaining_ammo", "out_of_combat_countdown",
+        ), ("current_heat", "last_projectile_fire_rate"))
         with self.lock:
-            normalized = self._create_robot_dynamic_status_state()
+            self._sync_basic_robot_locked()
+            normalized = dict(self.robot_dynamic_status)
             source = dict(payload or {})
             normalized["current_health"] = self._normalize_robot_status_uint(
                 source.get("current_health", normalized["current_health"]), 600
@@ -1384,9 +1470,7 @@ class StateManager:
                 0.0,
                 0.0,
             )
-            normalized["current_chassis_energy"] = self._normalize_robot_status_uint(
-                source.get("current_chassis_energy", normalized["current_chassis_energy"]), 0
-            )
+            normalized["reserved"] = 0
             normalized["current_buffer_energy"] = self._normalize_robot_status_uint(
                 source.get("current_buffer_energy", normalized["current_buffer_energy"]), 0
             )
@@ -1415,11 +1499,18 @@ class StateManager:
                 source.get("can_remote_ammo", normalized["can_remote_ammo"]), True
             )
             self.robot_dynamic_status = normalized
+            self.robot_dynamic_by_id[int(self.current_robot_id)] = normalized
+            index = self.robot_ids.index(int(self.current_robot_id))
+            self.global_unit_status["robot_health"][index] = normalized["current_health"]
+            self.global_unit_status["robot_heat"][index] = normalized["current_heat"]
+            self.global_unit_status["robot_fire_rate"][index] = normalized["last_projectile_fire_rate"]
+            self.global_unit_status["robot_heat_manual_hold"][index] = True
             self.log("Referee", f"Set RobotDynamicStatus: {normalized}")
             return dict(self.robot_dynamic_status)
 
     def get_robot_dynamic_status(self):
         with self.lock:
+            self._sync_basic_robot_locked()
             return dict(self.robot_dynamic_status)
 
     def set_robot_module_status(self, payload=None):
@@ -1794,45 +1885,24 @@ class StateManager:
             self.log("Referee", f"Adjust {team_name.capitalize()} Score: {current} -> {next_score} (delta={delta})")
 
     def set_economy(self, team, economy):
+        value = int(economy)
+        if value != economy or not 0 <= value <= 4294967295:
+            raise ValueError("当前经济必须是 uint32 范围内的整数")
         with self.lock:
             team_name = self._normalize_team(team)
             key = f"{team_name}_economy"
-            total_key = f"{team_name}_total_economy_obtained"
             old_value = self.global_logistics_status.get(key, 0)
-            total_value = self.global_logistics_status.get(total_key, 0)
-
-            # 超过累计经济时，自动限制到累计经济
-            new_value = self._clamp(economy, self.ECONOMY_MIN, self.ECONOMY_MAX)
-            if new_value > total_value:
-                new_value = total_value
-                self.log(
-                    "Referee",
-                    f"Economy auto-limited to total_economy_obtained ({total_value})",
-                )
-
-            self.global_logistics_status[key] = new_value
-            self.log("Referee", f"Set {team_name.capitalize()} Economy: {old_value} -> {new_value}")
+            # Manual fixtures preserve protocol fields independently. They do not
+            # infer spending or rewrite this value from the cumulative counter.
+            self.global_logistics_status[key] = value
+            self.log("Referee", f"Set {team_name.capitalize()} Economy: {old_value} -> {value}")
 
     def adjust_economy(self, team, delta):
         with self.lock:
             team_name = self._normalize_team(team)
             key = f"{team_name}_economy"
-            total_key = f"{team_name}_total_economy_obtained"
             current = self.global_logistics_status.get(key, 0)
-            total_value = self.global_logistics_status.get(total_key, 0)
-
-            next_value = self._clamp(current + int(delta), self.ECONOMY_MIN, self.ECONOMY_MAX)
-
-            # 超过累计经济时，自动限制到累计经济
-            if next_value > total_value:
-                next_value = total_value
-                self.log(
-                    "Referee",
-                    f"Economy auto-limited to total_economy_obtained ({total_value})",
-                )
-
-            self.global_logistics_status[key] = next_value
-            self.log("Referee", f"Adjust {team_name.capitalize()} Economy: {current} -> {next_value} (delta={delta})")
+            self.global_logistics_status[key] = self._clamp(current + int(delta), 0, 4294967295)
 
     def set_round_config(self, total_rounds=None, current_round=None):
         with self.lock:
@@ -1892,6 +1962,47 @@ class StateManager:
                 self.pending_game_result_end_reason = 1
                 self._enqueue_game_result()
 
+    def set_base_game_status(self, payload):
+        """Set a reproducible wire fixture without inferring elapsed time."""
+        updates = {}
+        for key in ("current_stage", "stage_countdown_sec", "stage_elapsed_sec"):
+            if key in payload:
+                minimum, maximum = (0, 5) if key == "current_stage" else (-2147483648, 2147483647)
+                value = int(payload[key])
+                if value != payload[key] or not minimum <= value <= maximum:
+                    raise ValueError(f"{key} 不在协议整数范围内")
+                updates[key] = value
+        with self.lock:
+            self.game_status.update(updates)
+            self.game_status["is_paused"] = self._normalize_robot_status_bool(payload.get("is_paused"), True)
+            self.log("Referee", "Set RM27 base GameStatus fixture")
+
+    def set_basic_robot_values(self, robot_index, payload):
+        """Manual protocol fixtures have no legacy death/respawn side effects."""
+        index = int(robot_index)
+        if not 0 <= index < len(self.robot_ids):
+            raise ValueError("机器人索引不存在")
+        updates = {}
+        for key, array_key, minimum, maximum in (
+            ("health", "robot_health", 0, 4294967295),
+            ("bullets", "robot_bullets", -2147483648, 2147483647),
+        ):
+            if key in payload:
+                value = int(payload[key])
+                if value != payload[key] or not minimum <= value <= maximum:
+                    raise ValueError(f"{key} 不在协议整数范围内")
+                updates[array_key] = value
+        if "heat" in payload:
+            value = float(payload["heat"])
+            if not math.isfinite(value) or not 0 <= value <= 3.4028234663852886e38:
+                raise ValueError("热量必须是有限、非负的 float 数值")
+            updates["robot_heat"] = value
+        with self.lock:
+            for key, value in updates.items():
+                self.global_unit_status[key][index] = value
+            self.global_unit_status["robot_heat_manual_hold"][index] = True
+            self._sync_basic_robot_locked()
+
     def set_logistics_protocol_state(
         self,
         team="red",
@@ -1900,12 +2011,21 @@ class StateManager:
         tech_level=None,
         encryption_level=None,
     ):
+        # The migrated logistics fields have independent wire types. Validate
+        # the whole request first so a later bad field cannot partly apply it.
+        if total_economy_obtained is not None:
+            self._check_basic_uint(total_economy_obtained, "累计总经济", 18446744073709551615)
+        for name, value in (("科技等级", tech_level), ("加密等级", encryption_level)):
+            if value is not None:
+                self._check_basic_uint(value, name)
         with self.lock:
             team_name = self._normalize_team(team)
             updates = []
             if total_economy_obtained is not None:
                 key = f"{team_name}_total_economy_obtained"
-                value = max(0, int(total_economy_obtained))
+                value = int(total_economy_obtained)
+                if not 0 <= value <= 18446744073709551615:
+                    raise ValueError("累计总经济必须是 uint64 范围内的十进制整数")
                 self.global_logistics_status[key] = value
                 updates.append(f"total_economy_obtained={value}")
             if total_damage is not None:
@@ -2268,12 +2388,14 @@ class StateManager:
         with self.lock:
             if 0 <= robot_index < len(self.global_unit_status["robot_health"]):
                 self.global_unit_status["robot_level"][robot_index] = int(level)
-                self.global_unit_status["robot_heat"][robot_index] = int(heat)
+                self.global_unit_status["robot_heat"][robot_index] = self._normalize_robot_status_float(heat, 0.0, 0.0)
                 if robot_index < len(self.global_unit_status["robot_heat_manual_hold"]):
                     self.global_unit_status["robot_heat_manual_hold"][robot_index] = bool(hold_heat)
                 self.global_unit_status["robot_power"][robot_index] = int(power)
                 self.global_unit_status["robot_fire_rate"][robot_index] = int(fire_rate)
-                self.global_unit_status["robot_bullets"][robot_index] = int(bullets)
+                # This global cumulative value is int32; Dynamic.remaining_ammo
+                # is a separate uint32 field and is not silently coerced.
+                self.global_unit_status["robot_bullets"][robot_index] = self._clamp(int(bullets), -2147483648, 2147483647)
                 self.log(
                     "Referee",
                     f"Set Robot {robot_index} Detail: Lvl{level} Heat{heat} HoldHeat{bool(hold_heat)} Pwr{power} FireRate{fire_rate} Bullets{bullets}"
@@ -2882,12 +3004,18 @@ class StateManager:
 
     def get_state(self):
         with self.lock:
+            self._sync_basic_robot_locked()
+            logistics_payload = self.global_logistics_status.copy()
+            # JSON numbers above 2**53 are lossy in browsers; preserve uint64.
+            for team_name in self.TEAM_NAMES:
+                key = f"{team_name}_total_economy_obtained"
+                logistics_payload[key] = str(logistics_payload[key])
             game_status_payload = self.game_status.copy()
             # Web 管理端仍消费 gameStatus.red_economy/blue_economy，先保留兼容导出。
-            game_status_payload.update(self.global_logistics_status)
+            game_status_payload.update(logistics_payload)
             return {
                 "gameStatus": game_status_payload,
-                "globalLogisticsStatus": self.global_logistics_status.copy(),
+                "globalLogisticsStatus": logistics_payload,
                 "globalUnitStatus": self.global_unit_status.copy(),
                 "refereeInfo": dict(self.referee_info),
                 "refereeInfoByTeam": {

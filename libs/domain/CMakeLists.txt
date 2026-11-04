@@ -2,6 +2,7 @@ add_library(rm27_domain STATIC
     RunMode.cpp
     RunMode.h
     ClientSnapshot.h
+    BasicData.h
     ConnectionState.h
 )
 set_target_properties(rm27_domain PROPERTIES AUTOMOC OFF)

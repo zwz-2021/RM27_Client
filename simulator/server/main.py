@@ -1,4 +1,4 @@
-"""Independent entry point for the preserved RM26 referee simulator."""
+"""Independent RM27 basic-data simulator entry; legacy role tools retained."""
 
 from __future__ import annotations
 
@@ -23,8 +23,8 @@ def port(value):
 
 def robot_id(value):
     number = int(value)
-    if number not in (*range(1, 8), *range(101, 108)):
-        raise argparse.ArgumentTypeError("robot ID must be 1..7 or 101..107")
+    if number not in (1, 3, 4, 5, 6, 7, 101, 103, 104, 105, 106, 107):
+        raise argparse.ArgumentTypeError("basic robot ID must be 1/3/4/5/6/7 or blue +100; 2/102 are reserved")
     return number
 
 
@@ -52,7 +52,7 @@ def probe_mqtt(host, mqtt_port, timeout=2):
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(description="RM26 referee simulator for RM27 development (2026 compatibility)")
+    parser = argparse.ArgumentParser(description="RM27 basic-data simulator with retained legacy role/video tools")
     parser.add_argument("--check", action="store_true", help="check Python dependencies and simulator assets without starting I/O")
     parser.add_argument("--probe-mqtt", nargs=2, metavar=("HOST", "PORT"), help="probe an existing broker using MQTT CONNECT and exit")
     parser.add_argument("--target-ip", default=os.getenv("RM_SIM_TARGET_IP", "127.0.0.1"))
@@ -70,7 +70,8 @@ def check_environment():
     if sys.version_info < (3, 11):
         raise RuntimeError("Python 3.11 or newer is required")
     for name in ("fastapi", "socketio", "uvicorn", "multipart", "cv2", "numpy",
-                 "paho.mqtt.client", "simulator.protocol.robomaster_pb2", "simulator.server.app"):
+                 "paho.mqtt.client", "simulator.protocol.robomaster_pb2",
+                 "simulator.protocol.rm27_base_pb2", "simulator.server.app"):
         importlib.import_module(name)
     root = Path(__file__).resolve().parents[1]
     for relative in ("protocol/robomaster.proto", "server/config.json", "tools/video_sender.py",
@@ -103,7 +104,7 @@ def main(argv=None):
         server = uvicorn.Server(uvicorn.Config(application, host=args.web_host, port=args.web_port))
         application.fastapi_app.state.request_exit = lambda: setattr(server, "should_exit", True)
         print(f"Web: http://{args.web_host}:{args.web_port}; MQTT: {args.mqtt_host}:{args.mqtt_port}")
-        print("2026 compatibility protocol; the current Qt client does not yet receive external match data.")
+        print("RM27 basic data: five migrated messages; other tools retain legacy behavior. Qt MQTT reception is step 2.")
         server.run()
         return 0
     except (ImportError, RuntimeError, OSError, ValueError) as error:

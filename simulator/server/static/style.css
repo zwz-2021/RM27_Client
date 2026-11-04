@@ -2361,3 +2361,12 @@ button.primary:disabled,
         transition-duration: 0.01ms !important;
     }
 }
+/* Step 1 fixture editor: compact controls stay usable before the legacy tools. */
+.basic-fixture { grid-column: 1 / -1; }
+.basic-fixture .score-control-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); }
+.base-table-wrap { overflow-x: auto; }
+.base-input-table { width: 100%; min-width: 410px; border-collapse: collapse; }
+.base-input-table th, .base-input-table td { padding: 6px 3px; text-align: left; }
+.base-input-table th:first-child { min-width: 85px; white-space: nowrap; }
+.base-input-table input { width: 90px; min-width: 65px; }
+.legacy-notice { grid-column: 1 / -1; border-color: #bc9352; }

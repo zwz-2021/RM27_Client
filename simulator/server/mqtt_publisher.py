@@ -42,14 +42,15 @@ if TYPE_CHECKING:
 
 # Preserved RM26 protocol messages; no external sim/ import or sys.path mutation.
 from ..protocol import robomaster_pb2 as pb
+from ..protocol import rm27_base_pb2 as base_pb
 
 
 class MQTTPublisher:
     """
     MQTT 数据发布器
 
-    按照官方《RoboMaster 2026 通信协议 V2.0.0》的自定义客户端协议规范，
-    通过 MQTT 发布比赛数据到客户端。
+    五类基础消息按本地《RoboMaster 2027 通信协议 V1.0.0》生成并发布。
+    未迁移的 RM26 角色工具仍保留；不属于本次 RM27 支持范围。
 
     主要 Topic:
         - GameStatus: 比赛全局状态 (5Hz)
@@ -610,6 +611,7 @@ class MQTTPublisher:
         self._workers = [
             threading.Thread(target=self._publish_loop_5hz, daemon=True),
             threading.Thread(target=self._publish_loop_1hz, daemon=True),
+            threading.Thread(target=self._publish_loop_10hz, daemon=True),
         ]
         for worker in self._workers:
             worker.start()
@@ -660,39 +662,21 @@ class MQTTPublisher:
                         self._publish_global_logistics_status(
                             state.get("globalLogisticsStatus", state["gameStatus"])
                         )
-                        self._publish_global_special_mechanism(state)
-                        self.publish_rune_status_sync(
-                            state, team=self._current_team_name()
-                        )
-                        buff_status = state.get("lastBuffStatus", {})
-                        if int(buff_status.get("buff_left_time", 0)) > 0:
-                            self.publish_buff(
-                                buff_status.get("robot_id", 0),
-                                buff_status.get("buff_type", 0),
-                                buff_status.get("buff_level", 1),
-                                buff_status.get("buff_max_time", 0),
-                                buff_status.get("buff_left_time", 0),
-                            )
-                        self._publish_air_support_status_sync(
-                            state, team=self._current_team_name()
-                        )
-
-                    try:
-                        self._publish_current_robot_respawn_status(state)
-                    except Exception as e:
-                        print(f"MQTTPublisher: respawn publish loop error - {e}")
-
-                    try:
-                        self._publish_pending_events()
-                    except Exception as e:
-                        print(f"MQTTPublisher: pending event publish loop error - {e}")
+                        # Unmigrated RM26 role/event messages are not periodic
+                        # RM27 fixtures. Their console tools remain labelled legacy.
             except Exception as e:
                 print(f"MQTTPublisher: 1Hz 发布错误 - {e}")
             self._stop_event.wait(1.0)
 
     def _publish_loop_10hz(self):
-        """10Hz 发布循环 - 机器人状态已改为触发式发送"""
+        """10Hz RobotDynamicStatus, table 2-1 of the fixed 2027 protocol."""
         while self.running:
+            try:
+                if self.connected:
+                    with self._periodic_publish_log_scope():
+                        self._publish_robot_dynamic_status(self.state_manager.get_state())
+            except Exception as e:
+                print(f"MQTTPublisher: 10Hz 发布错误 - {e}")
             self._stop_event.wait(0.1)
 
     # =========================================================================
@@ -789,7 +773,7 @@ class MQTTPublisher:
         if pb is None:
             return f"<{len(payload)} bytes>"
 
-        message_cls = getattr(pb, topic, None)
+        message_cls = getattr(base_pb, topic, None) or getattr(pb, topic, None)
         if message_cls is None:
             return f"<{len(payload)} bytes>"
 
@@ -816,12 +800,10 @@ class MQTTPublisher:
         # 直接传 gameStatus 的兼容路径，避免已有调试脚本失效。
         if isinstance(state.get("gameStatus"), dict):
             status = state["gameStatus"]
-            result = state.get("lastGameResult", {})
         else:
             status = state
-            result = getattr(self.state_manager, "last_game_result", {})
 
-        msg = pb.GameStatus()
+        msg = base_pb.GameStatus()
         msg.current_round = status.get("current_round", 1)
         msg.total_rounds = status.get("total_rounds", 2)
         msg.red_score = status.get("red_score", 0)
@@ -836,131 +818,43 @@ class MQTTPublisher:
             msg.game_result = 255
             msg.end_reason = 255
         else:
-            winner = int(result.get("winner", 0))
-            msg.game_result = winner if winner in (0, 1, 2) else 0
-            end_reason = int(result.get("end_reason", 1))
-            msg.end_reason = max(0, min(255, end_reason))
+            winner = int(status.get("game_result", 255))
+            if winner in (0, 1, 2):
+                msg.game_result = winner
+            end_reason = int(status.get("end_reason", 255))
+            if end_reason != 255:
+                msg.end_reason = end_reason
 
         self._publish("GameStatus", msg.SerializeToString())
 
     def _publish_global_unit_status(self, state: dict):
-        """
-        发布全局单位状态（MQTT）。
-
-        Topic: GlobalUnitStatus
-        """
-        if pb is None:
-            return
-
+        """2027 2.2.4: fixed R/B outposts and an ally/enemy 8-robot view."""
         status = state.get("globalUnitStatus", {})
-        red_outpost_health = int(
-            status.get("red_outpost_health", status.get("outpost_health", 1500))
-        )
-        red_base_health = int(
-            status.get("red_base_health", status.get("base_health", 5000))
-        )
-        blue_outpost_health = int(
-            status.get("blue_outpost_health", status.get("outpost_health", 1500))
-        )
-        blue_base_health = int(
-            status.get("blue_base_health", status.get("base_health", 5000))
-        )
-        # 直接使用设置的outpost_status，而不是根据血量计算
-        red_outpost_status = int(
-            status.get("red_outpost_status",
-                       3 if status.get("red_outpost_destroyed", red_outpost_health <= 0) else 1)
-        )
-        blue_outpost_status = int(
-            status.get("blue_outpost_status",
-                       3 if status.get("blue_outpost_destroyed", blue_outpost_health <= 0) else 1)
-        )
-        red_base_status = int(status.get("red_base_status", status.get("base_status", 0)))
-        blue_base_status = int(
-            status.get("blue_base_status", status.get("base_status", 0))
-        )
-        red_base_shield = int(
-            status.get("red_base_shield", status.get("base_shield", 0))
-        )
-        blue_base_shield = int(
-            status.get("blue_base_shield", status.get("base_shield", 0))
-        )
-        total_damage_red = int(status.get("total_damage_red", 0))
-        total_damage_blue = int(status.get("total_damage_blue", 0))
-
-        is_blue_perspective = int(self.current_robot_id or 1) >= 100
-        # 己方和敌方各补齐到 5 台机器人，使客户端采用中型阵容（5+5），
-        # 避免把紧凑阵容（3+3）误判为仅己方的扩展阵容。
-        # 红方编号为 {1,2,3,4,7}，蓝方编号为 {101,102,103,104,107}。
-        if is_blue_perspective:
-            ally_base_health = blue_base_health
-            ally_base_status = blue_base_status
-            ally_base_shield = blue_base_shield
-            ally_outpost_health = blue_outpost_health
-            ally_outpost_status = blue_outpost_status
-            enemy_base_health = red_base_health
-            enemy_base_status = red_base_status
-            enemy_base_shield = red_base_shield
-            enemy_outpost_health = red_outpost_health
-            enemy_outpost_status = red_outpost_status
-            ally_robot_health, ally_robot_bullets = (
-                self._build_protocol_global_unit_robot_values(state, "blue")
-            )
-            enemy_robot_health, _ = self._build_protocol_global_unit_robot_values(
-                state, "red"
-            )
-            total_damage_ally = total_damage_blue
-            total_damage_enemy = total_damage_red
-        else:
-            ally_base_health = red_base_health
-            ally_base_status = red_base_status
-            ally_base_shield = red_base_shield
-            ally_outpost_health = red_outpost_health
-            ally_outpost_status = red_outpost_status
-            enemy_base_health = blue_base_health
-            enemy_base_status = blue_base_status
-            enemy_base_shield = blue_base_shield
-            enemy_outpost_health = blue_outpost_health
-            enemy_outpost_status = blue_outpost_status
-            ally_robot_health, ally_robot_bullets = (
-                self._build_protocol_global_unit_robot_values(state, "red")
-            )
-            enemy_robot_health, _ = self._build_protocol_global_unit_robot_values(
-                state, "blue"
-            )
-            total_damage_ally = total_damage_red
-            total_damage_enemy = total_damage_blue
-
-        msg = pb.GlobalUnitStatus()
-        msg.base_health = ally_base_health
-        msg.base_status = ally_base_status
-        msg.base_shield = ally_base_shield
-        msg.outpost_health = ally_outpost_health
-        msg.outpost_status = ally_outpost_status
-        msg.enemy_base_health = enemy_base_health
-        msg.enemy_base_status = enemy_base_status
-        msg.enemy_base_shield = enemy_base_shield
-        msg.enemy_outpost_health = enemy_outpost_health
-        msg.enemy_outpost_status = enemy_outpost_status
-
-        for hp in ally_robot_health:
-            msg.robot_health.append(int(hp))
-
-        for hp in enemy_robot_health:
-            msg.robot_health.append(int(hp))
-
-        for bullets in ally_robot_bullets:
-            msg.robot_bullets.append(int(bullets))
-
-        msg.total_damage_ally = total_damage_ally
-        msg.total_damage_enemy = total_damage_enemy
-
+        ally = "blue" if int(self.current_robot_id or 1) >= 100 else "red"
+        enemy = "red" if ally == "blue" else "blue"
+        health, bullets, _ = self._resolve_protocol_robot_value_maps(state)
+        msg = base_pb.GlobalUnitStatus()
+        msg.base_health = int(status[f"{ally}_base_health"])
+        msg.enemy_base_health = int(status[f"{enemy}_base_health"])
+        # R and B refer to fixed map entities, not the current ally perspective.
+        msg.outpost_R_health = int(status["red_outpost_health"])
+        msg.outpost_B_health = int(status["blue_outpost_health"])
+        ally_offset = 100 if ally == "blue" else 0
+        enemy_offset = 100 if enemy == "blue" else 0
+        msg.robot_health.extend(health[rid + ally_offset] for rid in (1, 3, 4, 7))
+        msg.robot_health.extend(health[rid + enemy_offset] for rid in (1, 3, 4, 7))
+        # P-002 user instruction: preserve the read RM26 simulator's six slots.
+        # ID 2 is reserved in 2027; keep that slot zero, never invent a robot.
+        msg.robot_bullets.extend(bullets.get(rid + ally_offset, 0) for rid in (1, 2, 3, 4, 6, 7))
+        # Control states, damage and CP are outside this basic-data migration.
+        # Their optional fields are absent instead of carrying old RM26 values.
         self._publish("GlobalUnitStatus", msg.SerializeToString())
 
     def _publish_global_logistics_status(self, logistics_status):
         if pb is None:
             return
 
-        msg = pb.GlobalLogisticsStatus()
+        msg = base_pb.GlobalLogisticsStatus()
         team_prefix = "blue" if (self.current_robot_id or 1) >= 100 else "red"
         msg.remaining_economy = int(logistics_status.get(f"{team_prefix}_economy", 0))
         msg.total_economy_obtained = int(
@@ -1214,12 +1108,13 @@ class MQTTPublisher:
             return
         static_status = dict(state.get("robotStaticStatus", {}))
 
-        msg = pb.RobotStaticStatus()
+        msg = base_pb.RobotStaticStatus()
         msg.connection_state = max(0, int(static_status.get("connection_state", 1)))
         msg.field_state = max(0, int(static_status.get("field_state", 0)))
         msg.alive_state = max(0, int(static_status.get("alive_state", 1)))
         msg.robot_id = max(1, int(static_status.get("robot_id", self.current_robot_id or 1)))
-        msg.robot_type = max(0, int(static_status.get("robot_type", msg.robot_id % 100)))
+        # P-003: use the read RM26 simulator's convention as instructed by user.
+        msg.robot_type = int(static_status.get("robot_type", msg.robot_id % 100))
         msg.performance_system_shooter = max(
             0, int(static_status.get("performance_system_shooter", 1))
         )
@@ -1245,14 +1140,13 @@ class MQTTPublisher:
             if bool(getattr(self._publish_log_context, "periodic", False))
             else "event"
         )
-        print(
-            "MQTTPublisher: RobotStaticStatus sent "
-            f"source={publish_source} robot_id={msg.robot_id} "
-            f"robot_type={msg.robot_type} level={msg.level} "
-            f"perf_shooter={msg.performance_system_shooter} "
-            f"perf_chassis={msg.performance_system_chassis} "
-            f"max_health={msg.max_health} max_heat={msg.max_heat}"
-        )
+        if publish_source == "event":
+            print(
+                "MQTTPublisher: RobotStaticStatus sent "
+                f"source={publish_source} robot_id={msg.robot_id} "
+                f"level={msg.level} robot_type={msg.robot_type} "
+                f"max_health={msg.max_health} max_heat={msg.max_heat}"
+            )
 
     def publish_robot_static_status(self, state: Optional[dict] = None):
         source = state or self.state_manager.get_state()
@@ -1263,15 +1157,14 @@ class MQTTPublisher:
             return
         dynamic_status = dict(state.get("robotDynamicStatus", {}))
 
-        msg = pb.RobotDynamicStatus()
+        msg = base_pb.RobotDynamicStatus()
         msg.current_health = max(0, int(dynamic_status.get("current_health", 0)))
         msg.current_heat = max(0.0, float(dynamic_status.get("current_heat", 0.0)))
         msg.last_projectile_fire_rate = max(
             0.0, float(dynamic_status.get("last_projectile_fire_rate", 0.0))
         )
-        msg.current_chassis_energy = max(
-            0, int(dynamic_status.get("current_chassis_energy", 0))
-        )
+        # #4 is reserved in 2027 and carries no chassis-energy meaning.
+        msg.reserved = 0
         msg.current_buffer_energy = max(
             0, int(dynamic_status.get("current_buffer_energy", 0))
         )

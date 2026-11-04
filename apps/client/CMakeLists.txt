@@ -5,7 +5,7 @@ qt_add_executable(RM27_Client WIN32
     client.qrc
 )
 target_link_libraries(RM27_Client PRIVATE
-    rm27_config rm27_diagnostics rm27_transport rm27_presentation
+    rm27_config rm27_diagnostics rm27_transport rm27_presentation rm27_protocol
     Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2
 )
 target_compile_definitions(RM27_Client PRIVATE

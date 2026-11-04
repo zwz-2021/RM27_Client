@@ -85,6 +85,7 @@ def exercise_clients(base_url, mqtt_host, mqtt_port, video_directory):
     import requests
     import socketio
     from simulator.protocol import robomaster_pb2 as pb
+    from simulator.protocol import rm27_base_pb2 as base_pb
 
     session = requests.Session()
     session.trust_env = False
@@ -94,8 +95,10 @@ def exercise_clients(base_url, mqtt_host, mqtt_port, video_directory):
     subscribed = threading.Event()
     received = threading.Condition()
     latest, decode_errors = {}, []
-    messages = {"GameStatus": pb.GameStatus, "GlobalUnitStatus": pb.GlobalUnitStatus,
-                "RobotDynamicStatus": pb.RobotDynamicStatus,
+    messages = {"GameStatus": base_pb.GameStatus, "GlobalUnitStatus": base_pb.GlobalUnitStatus,
+                "GlobalLogisticsStatus": base_pb.GlobalLogisticsStatus,
+                "RobotStaticStatus": base_pb.RobotStaticStatus,
+                "RobotDynamicStatus": base_pb.RobotDynamicStatus,
                 "RobotPerformanceSelectionSync": pb.RobotPerformanceSelectionSync}
     uploaded_file = None
 
@@ -157,14 +160,34 @@ def exercise_clients(base_url, mqtt_host, mqtt_port, video_directory):
         require(wait_message("GameStatus").total_rounds >= 1, "GameStatus has no round data")
 
         console.connect(base_url, transports=["websocket"], wait_timeout=5)
-        console.call("referee_command", {"command": "set_hp", "robot_id": 0, "hp": 321}, timeout=5)
+        reply = console.call("referee_command", {"command": "set_basic_robot_values", "robot_index": 0,
+                                                "health": 321, "heat": 12.5, "bullets": -7}, timeout=5)
+        require(reply.get("ok"), f"Base fixture rejected: {reply}")
         wait_state(lambda state: state["globalUnitStatus"]["robot_health"][0] == 321,
                    "Web referee HP command")
         wait_message("GlobalUnitStatus", lambda message: bool(message.robot_health)
                      and message.robot_health[0] == 321)
-        # The RM26 dynamic status panel is an independent manually sent test message.
-        console.call("referee_command", {"command": "send_robot_dynamic_status", "current_health": 321}, timeout=5)
-        wait_message("RobotDynamicStatus", lambda message: message.current_health == 321)
+        unit = wait_message("GlobalUnitStatus")
+        require(len(unit.robot_health) == 8 and len(unit.robot_bullets) == 6,
+                "RM27 health/P-002 bullet array lengths differ")
+        require(unit.robot_bullets[0] == -7, "Signed P-002 cumulative ammo was lost")
+        # Dynamic now reads the same selected HP and is published at 10 Hz.
+        wait_message("RobotDynamicStatus", lambda message: message.current_health == 321 and message.current_heat == 12.5)
+        static = wait_message("RobotStaticStatus")
+        require(static.HasField("robot_type") and static.robot_type == 1,
+                "P-003 user-designated robot type was not present in actual field 5")
+        total = "18446744073709551615"
+        reply = console.call("referee_command", {"command": "set_logistics_protocol_state", "team": "red",
+                                                "total_economy_obtained": total}, timeout=5)
+        require(reply.get("ok"), f"uint64 economy rejected: {reply}")
+        wait_message("GlobalLogisticsStatus", lambda message: message.total_economy_obtained == int(total))
+        require(get_json("/api/state")["globalLogisticsStatus"]["red_total_economy_obtained"] == total,
+                "Console uint64 economy lost decimal precision")
+        reply = console.call("referee_command", {"command": "set_base_game_status", "current_stage": 4,
+                                                "stage_countdown_sec": -1, "stage_elapsed_sec": 30,
+                                                "is_paused": True}, timeout=5)
+        require(reply.get("ok"), f"Signed game time rejected: {reply}")
+        wait_message("GameStatus", lambda message: message.stage_countdown_sec == -1 and message.is_paused)
 
         selection = pb.RobotPerformanceSelectionCommand(shooter=2, chassis=3, sentry_control=1)
         delivery = peer.publish("RobotPerformanceSelectionCommand", selection.SerializeToString(), qos=1)

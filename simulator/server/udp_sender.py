@@ -126,13 +126,16 @@ class UDPSender:
         UDP fallback 下按当前客户端视角发送“己方血量快照”。
         """
         robot_hp = global_status["robot_health"]
+        # Preserve this legacy frame's original 1/3/6/7 mapping after the
+        # internal roster expands. It is not the RM27 MQTT health-array layout.
+        health_by_id = dict(zip(self.state_manager.robot_ids, robot_hp))
         is_blue_perspective = self.current_robot_id >= 100
+        offset = 100 if is_blue_perspective else 0
+        ally_robot_hp = [health_by_id.get(rid + offset, 0) for rid in (1, 3, 6, 7)]
         if is_blue_perspective:
-            ally_robot_hp = list(robot_hp[4:8])
             outpost_hp = int(global_status.get("blue_outpost_health", global_status.get("outpost_health", 0)))
             base_hp = int(global_status.get("blue_base_health", global_status.get("base_health", 0)))
         else:
-            ally_robot_hp = list(robot_hp[:4])
             outpost_hp = int(global_status.get("red_outpost_health", global_status.get("outpost_health", 0)))
             base_hp = int(global_status.get("red_base_health", global_status.get("base_health", 0)))
 

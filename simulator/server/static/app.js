@@ -33,7 +33,11 @@ if (!hasSocketIo || !hasVue) {
     el: '#app',
     data: {
         connected: false,
+        baseInputError: '',
+        baseGameForm: { current_stage: 0, stage_countdown_sec: 300, stage_elapsed_sec: 0, is_paused: true },
+        baseGameFormInitialized: false,
         currentRobotId: 1, // 当前登录机器人 ID
+        statusRobotId: 1,
         baseTeam: 'red',
         outpostTeam: 'red',
         runeTeam: 'red',
@@ -57,8 +61,8 @@ if (!hasSocketIo || !hasVue) {
         globalLogisticsStatus: {
             red_economy: 550,
             blue_economy: 550,
-            red_total_economy_obtained: 550,
-            blue_total_economy_obtained: 550,
+            red_total_economy_obtained: '550',
+            blue_total_economy_obtained: '550',
             red_total_damage: 0,
             blue_total_damage: 0,
             red_tech_level: 1,
@@ -67,13 +71,13 @@ if (!hasSocketIo || !hasVue) {
             blue_encryption_level: 1
         },
         globalUnitStatus: {
-            robot_health: [600, 600, 600, 600, 600, 600, 600, 600],
-            robot_max_hp: [600, 600, 600, 600, 600, 600, 600, 600],
-            robot_bullets: [0, 0, 0, 0, 0, 0, 0, 0],
-            robot_fire_rate: [0, 0, 0, 0, 0, 0, 0, 0],
-            robot_level: [1, 1, 1, 1, 1, 1, 1, 1],
-            robot_heat: [0, 0, 0, 0, 0, 0, 0, 0],
-            robot_power: [0, 0, 0, 0, 0, 0, 0, 0],
+            robot_health: Array(12).fill(600),
+            robot_max_hp: Array(12).fill(600),
+            robot_bullets: Array(12).fill(0),
+            robot_fire_rate: Array(12).fill(0),
+            robot_level: Array(12).fill(1),
+            robot_heat: Array(12).fill(0),
+            robot_power: Array(12).fill(0),
             base_health: 5000,
             outpost_health: 1500,
             base_status: 0,
@@ -168,7 +172,7 @@ if (!hasSocketIo || !hasVue) {
         deployModeStatus: 0,
         // 每队的英雄部署状态（0 未部署 / 1 已部署）
         deployStatusByTeam: { red: 0, blue: 0 },
-        robotIds: [1, 3, 6, 7, 101, 103, 106, 107],
+        robotIds: [1, 3, 4, 5, 6, 7, 101, 103, 104, 105, 106, 107],
         globalSpecialMechanism: {
             mechanism_id: [1, 2],
             mechanism_time_sec: [0, 0]
@@ -242,7 +246,7 @@ if (!hasSocketIo || !hasVue) {
             current_health: 600,
             current_heat: 0,
             last_projectile_fire_rate: 0,
-            current_chassis_energy: 0,
+            reserved: 0,
             current_buffer_energy: 0,
             current_experience: 100,
             experience_for_upgrade: 1000,
@@ -257,7 +261,7 @@ if (!hasSocketIo || !hasVue) {
             current_health: 600,
             current_heat: 0,
             last_projectile_fire_rate: 0,
-            current_chassis_energy: 0,
+            reserved: 0,
             current_buffer_energy: 0,
             current_experience: 100,
             experience_for_upgrade: 1000,
@@ -475,16 +479,9 @@ if (!hasSocketIo || !hasVue) {
             { value: 1, label: '1: 失败' }
         ],
         isEditingBuffCommand: false,
-        positions: [
-            { x: 2.0, y: 2.0, angle: 0.0 },
-            { x: 5.0, y: 2.0, angle: 0.0 },
-            { x: 8.0, y: 2.0, angle: 0.0 },
-            { x: 11.0, y: 2.0, angle: 0.0 },
-            { x: 17.0, y: 10.0, angle: 180.0 },
-            { x: 20.0, y: 10.0, angle: 180.0 },
-            { x: 23.0, y: 10.0, angle: 180.0 },
-            { x: 26.0, y: 10.0, angle: 180.0 }
-        ],
+        positions: Array.from({length: 12}, (_, index) => ({
+            x: 2 + (index % 6) * 2, y: index < 6 ? 2 : 10, angle: index < 6 ? 0 : 180
+        })),
         simulationConfig: {
             mode: 'quick',
             speed: 1,
@@ -551,13 +548,13 @@ if (!hasSocketIo || !hasVue) {
             video: true
         },
         minimapLegend: [
-            { team: 'red', role: 'Hero', robotId: 1, icon: 'H' },
+            { team: 'red', role: '重装', robotId: 1, icon: 'R' },
             { team: 'red', role: 'Infantry', robotId: 3, icon: 'I' },
-            { team: 'red', role: 'Scout', robotId: 6, icon: 'S' },
+            { team: 'red', role: '空中', robotId: 6, icon: 'S' },
             { team: 'red', role: 'Sentry', robotId: 7, icon: 'T' },
-            { team: 'blue', role: 'Hero', robotId: 101, icon: 'H' },
+            { team: 'blue', role: '重装', robotId: 101, icon: 'R' },
             { team: 'blue', role: 'Infantry', robotId: 103, icon: 'I' },
-            { team: 'blue', role: 'Scout', robotId: 106, icon: 'S' },
+            { team: 'blue', role: '空中', robotId: 106, icon: 'S' },
             { team: 'blue', role: 'Sentry', robotId: 107, icon: 'T' }
         ]
     },
@@ -601,11 +598,29 @@ if (!hasSocketIo || !hasVue) {
         socket.on('update', (data) => {
             // 如果后端有 currentRobotId，同步过来
             if (data.currentRobotId !== undefined && data.currentRobotId !== null) {
-                this.currentRobotId = parseInt(data.currentRobotId);
+                const incomingRobotId = Number(data.currentRobotId);
+                if (incomingRobotId !== this.statusRobotId) {
+                    // A different robot owns a different form; discard the old
+                    // robot's drafts only when the server confirms the switch.
+                    this.robotStaticStatusDirty = false;
+                    this.robotDynamicStatusDirty = false;
+                    this.statusRobotId = incomingRobotId;
+                }
+                this.currentRobotId = incomingRobotId;
             }
 
             const nextGameStatus = Object.assign({}, this.gameStatus, data.gameStatus || {});
             this.gameStatus = nextGameStatus;
+            // Load the current fixture once; subsequent updates preserve drafts.
+            if (!this.baseGameFormInitialized && data.gameStatus) {
+                this.baseGameForm = {
+                    current_stage: nextGameStatus.current_stage,
+                    stage_countdown_sec: nextGameStatus.stage_countdown_sec,
+                    stage_elapsed_sec: nextGameStatus.stage_elapsed_sec,
+                    is_paused: Boolean(nextGameStatus.is_paused)
+                };
+                this.baseGameFormInitialized = true;
+            }
             if (!this.isEditingMatchForm) {
                 this.matchForm.current_round = Number(this.gameStatus.current_round ?? this.matchForm.current_round);
                 this.matchForm.total_rounds = Number(this.gameStatus.total_rounds ?? this.matchForm.total_rounds);
@@ -788,13 +803,20 @@ if (!hasSocketIo || !hasVue) {
     methods: {
         // 当前机器人改变时触发
         onCurrentRobotChanged() {
+            this.robotStaticStatusDirty = false;
+            this.robotDynamicStatusDirty = false;
             // 保存到 localStorage
             localStorage.setItem('currentRobotId', this.currentRobotId.toString());
             // 发送给服务器
             this.sendCommand('set_current_robot', { robot_id: this.currentRobotId });
         },
         sendCommand(cmd, data = {}) {
-            socket.emit('referee_command', { command: cmd, ...data });
+            this.baseInputError = '';
+            socket.emit('referee_command', { command: cmd, ...data }, (reply) => {
+                if (reply && reply.ok === false) {
+                    this.baseInputError = reply.error || '基础输入未应用';
+                }
+            });
         },
         sendSimulationControl(action) {
             if (!this.connected) {
@@ -1177,7 +1199,7 @@ if (!hasSocketIo || !hasVue) {
         },
         mergeGlobalUnitStatusPreservingEdits(incomingStatus = {}) {
             const merged = Object.assign({}, this.globalUnitStatus, incomingStatus);
-            const detailKeys = ['robot_bullets', 'robot_fire_rate', 'robot_level', 'robot_heat', 'robot_power'];
+            const detailKeys = ['robot_health', 'robot_bullets', 'robot_fire_rate', 'robot_level', 'robot_heat', 'robot_power'];
 
             detailKeys.forEach((key) => {
                 if (!Array.isArray(merged[key])) {
@@ -1221,14 +1243,34 @@ if (!hasSocketIo || !hasVue) {
         getRobotLabel(robotId) {
             const normalized = Number(robotId);
             if (normalized >= 100) {
-                return `蓝${normalized - 100}`;
+                return `蓝${normalized - 100} ${this.getRobotRole(normalized)}`;
             }
-            return `红${normalized}`;
+            return `红${normalized} ${this.getRobotRole(normalized)}`;
+        },
+        getRobotRole(robotId) {
+            const roles = { 1: '重装', 2: '保留', 3: '步兵', 4: '步兵', 5: '步兵', 6: '空中', 7: '哨兵' };
+            return roles[Number(robotId) % 100] || '未迁移角色';
+        },
+        setBasicRobotFields(index) {
+            this.sendCommand('set_basic_robot_values', {
+                robot_index: index,
+                health: Number(this.globalUnitStatus.robot_health[index]),
+                heat: Number(this.globalUnitStatus.robot_heat[index]),
+                bullets: Number(this.globalUnitStatus.robot_bullets[index])
+            });
+        },
+        applyBaseGameStatus() {
+            this.sendCommand('set_base_game_status', {
+                current_stage: Number(this.baseGameForm.current_stage),
+                stage_countdown_sec: Number(this.baseGameForm.stage_countdown_sec),
+                stage_elapsed_sec: Number(this.baseGameForm.stage_elapsed_sec),
+                is_paused: Boolean(this.baseGameForm.is_paused)
+            });
         },
         getTeamRobotIds(team) {
             return team === 'blue'
-                ? [101, 103, 106, 107]
-                : [1, 3, 6, 7];
+                ? [101, 103, 104, 105, 106, 107]
+                : [1, 3, 4, 5, 6, 7];
         },
         getTeamRobotCards(team) {
             return this.getTeamRobotIds(team)
@@ -1343,7 +1385,7 @@ if (!hasSocketIo || !hasVue) {
                 field_state: Number(state.field_state ?? 0),
                 alive_state: Number(state.alive_state ?? 1),
                 robot_id: Number(state.robot_id ?? this.currentRobotId ?? 1),
-                robot_type: Number(state.robot_type ?? ((this.currentRobotId || 1) % 100)),
+                robot_type: Number(state.robot_type ?? ((state.robot_id ?? this.currentRobotId ?? 1) % 100)),
                 performance_system_shooter: Number(state.performance_system_shooter ?? 1),
                 performance_system_chassis: Number(state.performance_system_chassis ?? 1),
                 level: Number(state.level ?? 1),
@@ -1354,7 +1396,9 @@ if (!hasSocketIo || !hasVue) {
                 max_buffer_energy: Number(state.max_buffer_energy ?? 60),
                 max_chassis_energy: Number(state.max_chassis_energy ?? 120)
             });
-            this.isSyncingRobotStaticStatusForm = false;
+            // Vue's deep watcher runs on the next tick. Keep the guard set
+            // until that watcher has observed this programmatic synchronization.
+            this.$nextTick(() => { this.isSyncingRobotStaticStatusForm = false; });
         },
         syncRobotDynamicStatusFormFromState(state = {}) {
             this.isSyncingRobotDynamicStatusForm = true;
@@ -1362,7 +1406,7 @@ if (!hasSocketIo || !hasVue) {
                 current_health: Number(state.current_health ?? 600),
                 current_heat: this.toStatusFloat(state.current_heat ?? 0, 0),
                 last_projectile_fire_rate: this.toStatusFloat(state.last_projectile_fire_rate ?? 0, 0),
-                current_chassis_energy: Number(state.current_chassis_energy ?? 0),
+                reserved: Number(state.reserved ?? 0),
                 current_buffer_energy: Number(state.current_buffer_energy ?? 0),
                 current_experience: Number(state.current_experience ?? 100),
                 experience_for_upgrade: Number(state.experience_for_upgrade ?? 1000),
@@ -1373,7 +1417,9 @@ if (!hasSocketIo || !hasVue) {
                 can_remote_heal: state.can_remote_heal ? 1 : 0,
                 can_remote_ammo: state.can_remote_ammo ? 1 : 0
             });
-            this.isSyncingRobotDynamicStatusForm = false;
+            // Vue's deep watcher runs on the next tick. Keep the guard set
+            // until that watcher has observed this programmatic synchronization.
+            this.$nextTick(() => { this.isSyncingRobotDynamicStatusForm = false; });
         },
         syncRobotModuleStatusFormFromState(state = {}) {
             this.isSyncingRobotModuleStatusForm = true;
@@ -1390,14 +1436,16 @@ if (!hasSocketIo || !hasVue) {
                 main_controller: Number(state.main_controller ?? 1),
                 laser_detection_module: Number(state.laser_detection_module ?? 1)
             });
-            this.isSyncingRobotModuleStatusForm = false;
+            // Vue's deep watcher runs on the next tick. Keep the guard set
+            // until that watcher has observed this programmatic synchronization.
+            this.$nextTick(() => { this.isSyncingRobotModuleStatusForm = false; });
         },
         isRobotStaticStatusFormEqual(state = {}) {
             return Number(state.connection_state ?? 1) === Number(this.robotStaticStatusForm.connection_state)
                 && Number(state.field_state ?? 0) === Number(this.robotStaticStatusForm.field_state)
                 && Number(state.alive_state ?? 1) === Number(this.robotStaticStatusForm.alive_state)
                 && Number(state.robot_id ?? this.currentRobotId ?? 1) === Number(this.robotStaticStatusForm.robot_id)
-                && Number(state.robot_type ?? ((this.currentRobotId || 1) % 100)) === Number(this.robotStaticStatusForm.robot_type)
+                && Number(state.robot_type ?? ((state.robot_id ?? this.currentRobotId ?? 1) % 100)) === Number(this.robotStaticStatusForm.robot_type)
                 && Number(state.performance_system_shooter ?? 1) === Number(this.robotStaticStatusForm.performance_system_shooter)
                 && Number(state.performance_system_chassis ?? 1) === Number(this.robotStaticStatusForm.performance_system_chassis)
                 && Number(state.level ?? 1) === Number(this.robotStaticStatusForm.level)
@@ -1412,7 +1460,7 @@ if (!hasSocketIo || !hasVue) {
             return Number(state.current_health ?? 600) === Number(this.robotDynamicStatusForm.current_health)
                 && this.toStatusFloat(state.current_heat ?? 0, 0) === this.toStatusFloat(this.robotDynamicStatusForm.current_heat, 0)
                 && this.toStatusFloat(state.last_projectile_fire_rate ?? 0, 0) === this.toStatusFloat(this.robotDynamicStatusForm.last_projectile_fire_rate, 0)
-                && Number(state.current_chassis_energy ?? 0) === Number(this.robotDynamicStatusForm.current_chassis_energy)
+                && Number(state.reserved ?? 0) === Number(this.robotDynamicStatusForm.reserved)
                 && Number(state.current_buffer_energy ?? 0) === Number(this.robotDynamicStatusForm.current_buffer_energy)
                 && Number(state.current_experience ?? 100) === Number(this.robotDynamicStatusForm.current_experience)
                 && Number(state.experience_for_upgrade ?? 1000) === Number(this.robotDynamicStatusForm.experience_for_upgrade)
@@ -1793,7 +1841,7 @@ if (!hasSocketIo || !hasVue) {
                 current_health: this.toNonNegativeInt(this.robotDynamicStatusForm.current_health),
                 current_heat: this.toStatusFloat(this.robotDynamicStatusForm.current_heat, 0),
                 last_projectile_fire_rate: this.toStatusFloat(this.robotDynamicStatusForm.last_projectile_fire_rate, 0),
-                current_chassis_energy: this.toNonNegativeInt(this.robotDynamicStatusForm.current_chassis_energy),
+                reserved: 0,
                 current_buffer_energy: this.toNonNegativeInt(this.robotDynamicStatusForm.current_buffer_energy),
                 current_experience: this.toNonNegativeInt(this.robotDynamicStatusForm.current_experience),
                 experience_for_upgrade: this.toNonNegativeInt(this.robotDynamicStatusForm.experience_for_upgrade),
@@ -1939,40 +1987,19 @@ if (!hasSocketIo || !hasVue) {
         },
         applyEconomy(team) {
             const key = team === 'blue' ? 'blue_economy' : 'red_economy';
-            const totalKey = team === 'blue' ? 'blue_total_economy_obtained' : 'red_total_economy_obtained';
-            const economy = this.controlValues[key];
-            const total = this.globalLogisticsStatus[totalKey];
-
-            // 超过累计经济时，自动限制到累计经济
-            let finalEconomy = economy;
-            if (finalEconomy > total) {
-                finalEconomy = total;
-            }
-
-            this.sendCommand('set_economy', { team: team, economy: finalEconomy });
+            this.sendCommand('set_economy', { team, economy: Number(this.controlValues[key]) });
         },
         adjustEconomy(team, delta) {
             const key = team === 'blue' ? 'blue_economy' : 'red_economy';
-            const totalKey = team === 'blue' ? 'blue_total_economy_obtained' : 'red_total_economy_obtained';
-            const currentEconomy = this.controlValues[key];
-            const total = this.globalLogisticsStatus[totalKey];
-            let newEconomy = currentEconomy + delta;
-
-            // 自动限制范围
-            if (newEconomy > total) {
-                newEconomy = total;
-            }
-            if (newEconomy < 0) {
-                newEconomy = 0;
-            }
-
-            this.sendCommand('adjust_economy', { team: team, delta: newEconomy - currentEconomy });
+            const current = Number(this.controlValues[key]);
+            const next = Math.max(0, Math.min(4294967295, current + delta));
+            this.sendCommand('adjust_economy', { team, delta: next - current });
         },
         setLogisticsProtocolState(team) {
             const teamName = team === 'blue' ? 'blue' : 'red';
             this.sendCommand('set_logistics_protocol_state', {
                 team: teamName,
-                total_economy_obtained: Number(this.globalLogisticsStatus[`${teamName}_total_economy_obtained`] ?? 0),
+                total_economy_obtained: String(this.globalLogisticsStatus[`${teamName}_total_economy_obtained`] ?? '0'),
                 total_damage: Number(this.globalLogisticsStatus[`${teamName}_total_damage`] ?? 0),
                 tech_level: Number(this.globalLogisticsStatus[`${teamName}_tech_level`] ?? 0),
                 encryption_level: Number(this.globalLogisticsStatus[`${teamName}_encryption_level`] ?? 0)
@@ -2380,9 +2407,9 @@ if (!hasSocketIo || !hasVue) {
             const isBlue = robotId >= 100;
             const isActive = index === this.draggingRobot;
             const roleMap = {
-                1: { icon: 'H', label: 'Hero' },
+                1: { icon: 'R', label: '重装' },
                 3: { icon: 'I', label: 'Infantry' },
-                6: { icon: 'S', label: 'Scout' },
+                6: { icon: 'A', label: '空中' },
                 7: { icon: 'T', label: 'Sentry' }
             };
             const role = roleMap[robotId % 100] || { icon: 'R', label: 'Robot' };
@@ -2593,12 +2620,12 @@ if (!hasSocketIo || !hasVue) {
         },
         getStageName(stage) {
             const stages = {
-                0: '未开始',
+                0: '未开始比赛',
                 1: '准备阶段',
-                2: '自检阶段',
-                3: '倒计时',
+                2: '十五秒裁判系统自检阶段',
+                3: '五秒倒计时',
                 4: '比赛中',
-                5: '比赛结束'
+                5: '比赛结算中'
             };
             return stages[stage] || '未知阶段';
         },

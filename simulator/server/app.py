@@ -51,7 +51,7 @@ LOGGER = logging.getLogger(__name__)
 def create_app(args):
     """Assemble the preserved upstream server without starting I/O on import."""
     state_manager = StateManager()
-    state_manager.current_robot_id = args.current_robot_id
+    state_manager.select_robot(args.current_robot_id)
     mqtt_publisher = udp_sender = udp_receiver = None
     video_streamer = industrial_camera_streamer = None
     match_simulation_engine = MatchSimulationEngine(state_manager)
@@ -151,7 +151,7 @@ def create_app(args):
     # 创建异步 SocketIO 服务器，允许跨域
     sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
     # 创建 FastAPI 应用
-    app = FastAPI(title="RM26 referee simulator for RM27 development", lifespan=lifespan)
+    app = FastAPI(title="RM27 basic data simulator (legacy tools retained)", lifespan=lifespan)
     app.state.simulator = resources
 
     # 配置 CORS 中间件，允许所有来源访问
@@ -259,6 +259,14 @@ def create_app(args):
 
     @sio.event
     async def referee_command(sid, data):
+        try:
+            await _apply_referee_command(sid, data)
+            return {"ok": True}
+        except (TypeError, ValueError, OverflowError) as error:
+            state_manager.log("WebConsole", str(error), type="error")
+            return {"ok": False, "error": str(error)}
+
+    async def _apply_referee_command(sid, data):
         """
         处理来自 Web 控制台的裁判指令
         根据指令类型调用相应的组件方法
@@ -335,6 +343,10 @@ def create_app(args):
                 data.get("stage", 0),
                 data.get("countdown_sec"),
             )
+        elif cmd == "set_base_game_status":
+            state_manager.set_base_game_status(data)
+        elif cmd == "set_basic_robot_values":
+            state_manager.set_basic_robot_values(data.get("robot_index"), data)
         elif cmd == "set_economy":
             # 设置经济
             state_manager.set_economy(data.get("team", "red"), data.get("economy", 0))
@@ -650,12 +662,7 @@ def create_app(args):
                 )
                 await sio.emit("simulation_status", blocked_status, to=sid)
             args.current_robot_id = robot_id
-            state_manager.current_robot_id = robot_id
-            static_status = state_manager.get_robot_static_status()
-            if int(static_status.get("robot_id", previous_robot_id) or previous_robot_id) == previous_robot_id:
-                static_status["robot_id"] = robot_id
-                static_status["robot_type"] = int(robot_id) % 100
-                state_manager.set_robot_static_status(static_status)
+            state_manager.select_robot(robot_id)
             if mqtt_publisher:
                 mqtt_publisher.current_robot_id = robot_id
             if udp_sender:
@@ -955,7 +962,9 @@ def create_app(args):
     @app.get("/api/health")
     async def health():
         return {
-            "status": "ok", "protocol": "rm26-compat",
+            "status": "ok", "protocol": "rm27-base-v1.0.0+legacy-tools",
+            "basicTopics": ["GameStatus", "GlobalUnitStatus", "GlobalLogisticsStatus",
+                            "RobotStaticStatus", "RobotDynamicStatus"],
             "instanceId": os.getenv("RM_SIM_INSTANCE_ID", ""),
             "mqttConnected": bool(mqtt_publisher and mqtt_publisher.connected),
             "currentRobotId": state_manager.current_robot_id,

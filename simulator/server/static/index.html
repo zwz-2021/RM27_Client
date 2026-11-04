@@ -5,18 +5,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RoboMaster Simulation Server</title>
-    <link rel="stylesheet" href="style.css?v=20260809_03">
+    <link rel="stylesheet" href="style.css?v=20261031_base">
     <script src="/vendor/socket.io.min.js" defer></script>
     <script src="/vendor/vue.min.js" defer></script>
     <script src="/map_geometry.js?v=20260809_01" defer></script>
-    <script src="/app.js?v=20260809_01" defer></script>
+    <script src="/app.js?v=20261101_type" defer></script>
 </head>
 
 <body>
     <div id="app">
         <header class="app-header">
             <div class="brand-lockup">
-                <span class="brand-eyebrow">RM26 // ARENA SYSTEMS</span>
+                <span class="brand-eyebrow">RM27 // BASIC DATA</span>
                 <div class="brand-title-row">
                     <span class="brand-mark" aria-hidden="true">R</span>
                     <div>
@@ -41,6 +41,171 @@
         </header>
 
         <main>
+            <section class="panel basic-fixture" id="basicData">
+                <h2>第 1 步：2027 基础数据准备</h2>
+                <p v-if="baseInputError" role="alert" class="base-input-error">{{ baseInputError }}</p>
+                <p>已更新比赛阶段与秒数、机器人编号、血量、热量、允许发弹量和经济；客户端网络接收留到第 2 步。这里的值是手工测试场景，不是官方设备数据。</p>
+                <p class="hint">全局血量报文按己方 1/3/4/7、对方 1/3/4/7 排列；5/6 号的血量可在其自身动态状态中发送。全局发弹量按 P-002 的己方 1/2（保留为 0）/3/4/6/7 六项排列。</p>
+                <div class="score-control-grid">
+                    <div class="score-control-card">
+                        <h4>比赛阶段和时间（秒）</h4>
+                        <div class="control-line"><label>阶段</label><select v-model.number="baseGameForm.current_stage"><option v-for="stage in [0,1,2,3,4,5]" :key="stage" :value="stage">{{ stage }}: {{ getStageName(stage) }}</option></select></div>
+                        <div class="control-line"><label>阶段剩余秒数</label><input type="number" min="-2147483648" max="2147483647" v-model.number="baseGameForm.stage_countdown_sec"></div>
+                        <div class="control-line"><label>阶段已过秒数</label><input type="number" min="-2147483648" max="2147483647" v-model.number="baseGameForm.stage_elapsed_sec"></div>
+                        <label><input type="checkbox" v-model="baseGameForm.is_paused"> 暂停倒计时，固定测试值</label>
+                        <div class="actions"><button @click="applyBaseGameStatus">应用比赛基础数据</button></div>
+                        <p>当前：{{ getStageName(gameStatus.current_stage) }}，剩余 {{ gameStatus.stage_countdown_sec }} 秒，已过 {{ gameStatus.stage_elapsed_sec || 0 }} 秒。</p>
+                    </div>
+                    <div class="score-control-card" v-for="team in ['red','blue']" :key="team">
+                        <h4>{{ team === 'red' ? '红方' : '蓝方' }}机器人基础输入</h4>
+                        <div class="base-table-wrap"><table class="base-input-table"><thead><tr><th>编号 / 名称</th><th>血量</th><th>热量</th><th>全局累计发弹量</th></tr></thead><tbody>
+                        <tr v-for="card in getTeamRobotCards(team)" :key="card.robotId"><th>{{ getRobotLabel(card.robotId) }}</th>
+                            <td><input :aria-label="getRobotLabel(card.robotId) + '血量'" type="number" min="0" max="4294967295" v-model.number="globalUnitStatus.robot_health[card.index]" @focus="startEditRobotDetail(card.index)" @blur="finishEditRobotDetail(card.index)" @change="setBasicRobotFields(card.index)"></td>
+                            <td><input :aria-label="getRobotLabel(card.robotId) + '热量'" type="number" min="0" step="0.1" v-model.number="globalUnitStatus.robot_heat[card.index]" @focus="startEditRobotDetail(card.index)" @blur="finishEditRobotDetail(card.index)" @change="setBasicRobotFields(card.index)"></td>
+                            <td><input :aria-label="getRobotLabel(card.robotId) + '全局累计发弹量'" type="number" min="-2147483648" max="2147483647" v-model.number="globalUnitStatus.robot_bullets[card.index]" @focus="startEditRobotDetail(card.index)" @blur="finishEditRobotDetail(card.index)" @change="setBasicRobotFields(card.index)"></td>
+                        </tr></tbody></table></div>
+                        <p class="hint">输入后离开输入框应用。全局累计发弹量保留有符号整数；自身剩余允许发弹量在下方动态状态中单独填写。</p>
+                    </div>
+                </div>
+            </section>
+            <!-- 机器人状态控制 -->
+            <section class="panel score-economy">
+                <h3>2027 当前机器人基础状态</h3>
+                <p class="hint">本次更新静态与动态状态。血量、热量与全队输入共用状态；全局 int32 累计发弹量与这里 uint32 剩余允许发弹量分别设置，不表示实弹库存。模块状态仍属旧版工具。</p>
+                <div class="score-control-grid robot-status-grid">
+                    <div class="score-control-card robot-status-card">
+                        <h4>RobotStaticStatus</h4>
+                        <div class="control-line"><label>连接状态</label><input type="number" v-model.number="robotStaticStatusForm.connection_state" min="0"></div>
+                        <div class="control-line"><label>上场状态</label><input type="number" v-model.number="robotStaticStatusForm.field_state" min="0"></div>
+                        <div class="control-line"><label>存活状态</label><input type="number" v-model.number="robotStaticStatusForm.alive_state" min="0"></div>
+                        <div class="control-line"><label>机器人编号</label><strong>{{ getRobotLabel(currentRobotId) }}（在顶部选择）</strong></div>
+                        <div class="control-line"><label>类型编号 / 名称</label><strong>{{ robotStaticStatusForm.robot_type }} / {{ getRobotRole(robotStaticStatusForm.robot_id) }}（随机器人编号确定）</strong></div>
+                        <p class="hint">P-003 按用户指定的旧代码约定，结合 2027 编号解释；红蓝同类使用相同类型编号。</p>
+                        <div class="control-line"><label>发射机构</label><input type="number" v-model.number="robotStaticStatusForm.performance_system_shooter" min="0"></div>
+                        <div class="control-line"><label>底盘</label><input type="number" v-model.number="robotStaticStatusForm.performance_system_chassis" min="0"></div>
+                        <div class="control-line"><label>当前等级</label><input type="number" v-model.number="robotStaticStatusForm.level" min="0"></div>
+                        <div class="control-line"><label>最大血量</label><input type="number" v-model.number="robotStaticStatusForm.max_health" min="0"></div>
+                        <div class="control-line"><label>最大热量</label><input type="number" v-model.number="robotStaticStatusForm.max_heat" min="0"></div>
+                        <div class="control-line"><label>热量冷却速率</label><input type="number" v-model.number="robotStaticStatusForm.heat_cooldown_rate" min="0" step="0.1"></div>
+                        <div class="control-line"><label>最大功率</label><input type="number" v-model.number="robotStaticStatusForm.max_power" min="0"></div>
+                        <div class="control-line"><label>最大缓冲能量</label><input type="number" v-model.number="robotStaticStatusForm.max_buffer_energy" min="0"></div>
+                        <div class="control-line"><label>最大底盘能量</label><input type="number" v-model.number="robotStaticStatusForm.max_chassis_energy" min="0"></div>
+                        <div class="actions"><button @click="sendRobotStaticStatus">发送静态状态</button></div>
+                    </div>
+                    <div class="score-control-card robot-status-card">
+                        <h4>RobotDynamicStatus</h4>
+                        <div class="control-line"><label>当前血量</label><input type="number" v-model.number="robotDynamicStatusForm.current_health" min="0"></div>
+                        <div class="control-line"><label>当前热量</label><input type="number" v-model.number="robotDynamicStatusForm.current_heat" min="0" step="0.1"></div>
+                        <div class="control-line"><label>上一次弹丸射速</label><input type="number" v-model.number="robotDynamicStatusForm.last_projectile_fire_rate" min="0" step="0.1"></div>
+                        <p class="hint">2027 第 4 字段是保留位，不作为底盘能量输入。</p>
+                        <div class="control-line"><label>当前缓冲能量</label><input type="number" v-model.number="robotDynamicStatusForm.current_buffer_energy" min="0"></div>
+                        <div class="control-line"><label>当前经验值</label><input type="number" v-model.number="robotDynamicStatusForm.current_experience" min="0"></div>
+                        <div class="control-line"><label>距离下一次升级仍需获得的经验</label><input type="number" v-model.number="robotDynamicStatusForm.experience_for_upgrade" min="0"></div>
+                        <div class="control-line"><label>累计已发弹量 </label><input type="number" v-model.number="robotDynamicStatusForm.total_projectiles_fired" min="0"></div>
+                        <div class="control-line"><label>剩余允许发弹量</label><input type="number" v-model.number="robotDynamicStatusForm.remaining_ammo" min="0"></div>
+                        <div class="control-line"><label>是否处于脱战状态</label><select v-model.number="robotDynamicStatusForm.is_out_of_combat"><option :value="0">0</option><option :value="1">1</option></select></div>
+                        <div class="control-line"><label>脱战状态倒计时</label><input type="number" v-model.number="robotDynamicStatusForm.out_of_combat_countdown" min="0"></div>
+                        <div class="control-line"><label>是否可以远程补血</label><select v-model.number="robotDynamicStatusForm.can_remote_heal"><option :value="0">0</option><option :value="1">1</option></select></div>
+                        <div class="control-line"><label>是否可以远程补弹</label><select v-model.number="robotDynamicStatusForm.can_remote_ammo"><option :value="0">0</option><option :value="1">1</option></select></div>
+                        <div class="actions"><button @click="sendRobotDynamicStatus">发送动态状态</button></div>
+                    </div>
+                    <div class="score-control-card robot-status-card">
+                        <h4>RobotModuleStatus（旧版工具，尚未迁移）</h4>
+                        <div class="control-line"><label>电源管理</label><input type="number" v-model.number="robotModuleStatusForm.power_manager" min="0"></div>
+                        <div class="control-line"><label>rfid</label><input type="number" v-model.number="robotModuleStatusForm.rfid" min="0"></div>
+                        <div class="control-line"><label>灯条</label><input type="number" v-model.number="robotModuleStatusForm.light_strip" min="0"></div>
+                        <div class="control-line"><label>17mm 发射机构</label><input type="number" v-model.number="robotModuleStatusForm.small_shooter" min="0"></div>
+                        <div class="control-line"><label>42mm 发射机构</label><input type="number" v-model.number="robotModuleStatusForm.big_shooter" min="0"></div>
+                        <div class="control-line"><label>定位模块</label><input type="number" v-model.number="robotModuleStatusForm.uwb" min="0"></div>
+                        <div class="control-line"><label>装甲</label><input type="number" v-model.number="robotModuleStatusForm.armor" min="0"></div>
+                        <div class="control-line"><label>图传</label><input type="number" v-model.number="robotModuleStatusForm.video_transmission" min="0"></div>
+                        <div class="control-line"><label>电容</label><input type="number" v-model.number="robotModuleStatusForm.capacitor" min="0"></div>
+                        <div class="control-line"><label>主控</label><input type="number" v-model.number="robotModuleStatusForm.main_controller" min="0"></div>
+                        <div class="control-line"><label>激光检测</label><input type="number" v-model.number="robotModuleStatusForm.laser_detection_module" min="0"></div>
+                        <div class="actions"><button @click="sendRobotModuleStatus">发送模块状态</button></div>
+                    </div>
+                </div>
+            </section>
+
+
+
+            <section class="panel score-economy">
+                <h3>比分与经济控制</h3>
+                <div class="score-control-grid">
+                    <div class="score-control-card red-card">
+                        <h4>红方</h4>
+                        <div class="control-line">
+                            <label>比分</label>
+                            <input type="number" v-model.number="controlValues.red_score" min="0" max="999" @focus="isEditingControlValues=true" @blur="isEditingControlValues=false">
+                            <button @click="applyScore('red')">设置</button>
+                            <button @click="adjustScore('red', 1)">+1</button>
+                            <button @click="adjustScore('red', -1)">-1</button>
+                        </div>
+                        <div class="control-line">
+                            <label>经济</label>
+                            <input type="number" v-model.number="controlValues.red_economy" min="0" max="4294967295" @focus="isEditingControlValues=true" @blur="isEditingControlValues=false">
+                            <button @click="applyEconomy('red')">设置</button>
+                            <button @click="adjustEconomy('red', 50)">+50</button>
+                            <button @click="adjustEconomy('red', -50)">-50</button>
+                        </div>
+                        <div class="control-line">
+                            <label>累计经济</label>
+                            <input type="text" inputmode="numeric" pattern="[0-9]+" v-model="globalLogisticsStatus.red_total_economy_obtained" @focus="isEditingGlobalLogisticsStatus=true" @blur="isEditingGlobalLogisticsStatus=false">
+                        </div>
+                        <div class="control-line">
+                            <label>累计总伤害（本次不发送）</label>
+                            <input type="number" v-model.number="globalLogisticsStatus.red_total_damage" min="0" @focus="isEditingGlobalLogisticsStatus=true" @blur="isEditingGlobalLogisticsStatus=false">
+                        </div>
+                        <div class="control-line">
+                            <label>科技等级</label>
+                            <input type="number" v-model.number="globalLogisticsStatus.red_tech_level" min="0" @focus="isEditingGlobalLogisticsStatus=true" @blur="isEditingGlobalLogisticsStatus=false">
+                        </div>
+                        <div class="control-line">
+                            <label>加密等级</label>
+                            <input type="number" v-model.number="globalLogisticsStatus.red_encryption_level" min="0" @focus="isEditingGlobalLogisticsStatus=true" @blur="isEditingGlobalLogisticsStatus=false">
+                            <button @click="setLogisticsProtocolState('red')">同步协议字段</button>
+                        </div>
+                    </div>
+                    <div class="score-control-card blue-card">
+                        <h4>蓝方</h4>
+                        <div class="control-line">
+                            <label>比分</label>
+                            <input type="number" v-model.number="controlValues.blue_score" min="0" max="999" @focus="isEditingControlValues=true" @blur="isEditingControlValues=false">
+                            <button @click="applyScore('blue')">设置</button>
+                            <button @click="adjustScore('blue', 1)">+1</button>
+                            <button @click="adjustScore('blue', -1)">-1</button>
+                        </div>
+                        <div class="control-line">
+                            <label>经济</label>
+                            <input type="number" v-model.number="controlValues.blue_economy" min="0" max="4294967295" @focus="isEditingControlValues=true" @blur="isEditingControlValues=false">
+                            <button @click="applyEconomy('blue')">设置</button>
+                            <button @click="adjustEconomy('blue', 50)">+50</button>
+                            <button @click="adjustEconomy('blue', -50)">-50</button>
+                        </div>
+                        <div class="control-line">
+                            <label>累计经济</label>
+                            <input type="text" inputmode="numeric" pattern="[0-9]+" v-model="globalLogisticsStatus.blue_total_economy_obtained" @focus="isEditingGlobalLogisticsStatus=true" @blur="isEditingGlobalLogisticsStatus=false">
+                        </div>
+                        <div class="control-line">
+                            <label>累计总伤害（本次不发送）</label>
+                            <input type="number" v-model.number="globalLogisticsStatus.blue_total_damage" min="0" @focus="isEditingGlobalLogisticsStatus=true" @blur="isEditingGlobalLogisticsStatus=false">
+                        </div>
+                        <div class="control-line">
+                            <label>科技等级</label>
+                            <input type="number" v-model.number="globalLogisticsStatus.blue_tech_level" min="0" @focus="isEditingGlobalLogisticsStatus=true" @blur="isEditingGlobalLogisticsStatus=false">
+                        </div>
+                        <div class="control-line">
+                            <label>加密等级</label>
+                            <input type="number" v-model.number="globalLogisticsStatus.blue_encryption_level" min="0" @focus="isEditingGlobalLogisticsStatus=true" @blur="isEditingGlobalLogisticsStatus=false">
+                            <button @click="setLogisticsProtocolState('blue')">同步协议字段</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+
+            <section class="panel legacy-notice"><h3>以下保留旧版演示和开发工具</h3><p>自动比赛、角色操作、地图、视频、判罚等尚未按本路线迁移和验证。它们不在本次支持清单中，旧控制字段不会混入已迁移的基础消息。</p></section>
+
             <section id="simulationStage" class="panel simulation-stage" :class="{ 'is-fullscreen': isMapFullscreen }">
                 <div class="simulation-toolbar">
                     <div class="simulation-toolbar-heading">
@@ -251,84 +416,9 @@
                 </div>
             </section>
 
-            <section class="panel score-economy">
-                <h3>比分与经济控制</h3>
-                <div class="score-control-grid">
-                    <div class="score-control-card red-card">
-                        <h4>红方</h4>
-                        <div class="control-line">
-                            <label>比分</label>
-                            <input type="number" v-model.number="controlValues.red_score" min="0" max="999" @focus="isEditingControlValues=true" @blur="isEditingControlValues=false">
-                            <button @click="applyScore('red')">设置</button>
-                            <button @click="adjustScore('red', 1)">+1</button>
-                            <button @click="adjustScore('red', -1)">-1</button>
-                        </div>
-                        <div class="control-line">
-                            <label>经济</label>
-                            <input type="number" v-model.number="controlValues.red_economy" min="0" max="100000" @focus="isEditingControlValues=true" @blur="isEditingControlValues=false">
-                            <button @click="applyEconomy('red')">设置</button>
-                            <button @click="adjustEconomy('red', 50)">+50</button>
-                            <button @click="adjustEconomy('red', -50)">-50</button>
-                        </div>
-                        <div class="control-line">
-                            <label>累计经济</label>
-                            <input type="number" v-model.number="globalLogisticsStatus.red_total_economy_obtained" min="0" @focus="isEditingGlobalLogisticsStatus=true" @blur="isEditingGlobalLogisticsStatus=false">
-                        </div>
-                        <div class="control-line">
-                            <label>累计总伤害</label>
-                            <input type="number" v-model.number="globalLogisticsStatus.red_total_damage" min="0" @focus="isEditingGlobalLogisticsStatus=true" @blur="isEditingGlobalLogisticsStatus=false">
-                        </div>
-                        <div class="control-line">
-                            <label>科技等级</label>
-                            <input type="number" v-model.number="globalLogisticsStatus.red_tech_level" min="0" @focus="isEditingGlobalLogisticsStatus=true" @blur="isEditingGlobalLogisticsStatus=false">
-                        </div>
-                        <div class="control-line">
-                            <label>加密等级</label>
-                            <input type="number" v-model.number="globalLogisticsStatus.red_encryption_level" min="0" @focus="isEditingGlobalLogisticsStatus=true" @blur="isEditingGlobalLogisticsStatus=false">
-                            <button @click="setLogisticsProtocolState('red')">同步协议字段</button>
-                        </div>
-                    </div>
-                    <div class="score-control-card blue-card">
-                        <h4>蓝方</h4>
-                        <div class="control-line">
-                            <label>比分</label>
-                            <input type="number" v-model.number="controlValues.blue_score" min="0" max="999" @focus="isEditingControlValues=true" @blur="isEditingControlValues=false">
-                            <button @click="applyScore('blue')">设置</button>
-                            <button @click="adjustScore('blue', 1)">+1</button>
-                            <button @click="adjustScore('blue', -1)">-1</button>
-                        </div>
-                        <div class="control-line">
-                            <label>经济</label>
-                            <input type="number" v-model.number="controlValues.blue_economy" min="0" max="100000" @focus="isEditingControlValues=true" @blur="isEditingControlValues=false">
-                            <button @click="applyEconomy('blue')">设置</button>
-                            <button @click="adjustEconomy('blue', 50)">+50</button>
-                            <button @click="adjustEconomy('blue', -50)">-50</button>
-                        </div>
-                        <div class="control-line">
-                            <label>累计经济</label>
-                            <input type="number" v-model.number="globalLogisticsStatus.blue_total_economy_obtained" min="0" @focus="isEditingGlobalLogisticsStatus=true" @blur="isEditingGlobalLogisticsStatus=false">
-                        </div>
-                        <div class="control-line">
-                            <label>累计总伤害</label>
-                            <input type="number" v-model.number="globalLogisticsStatus.blue_total_damage" min="0" @focus="isEditingGlobalLogisticsStatus=true" @blur="isEditingGlobalLogisticsStatus=false">
-                        </div>
-                        <div class="control-line">
-                            <label>科技等级</label>
-                            <input type="number" v-model.number="globalLogisticsStatus.blue_tech_level" min="0" @focus="isEditingGlobalLogisticsStatus=true" @blur="isEditingGlobalLogisticsStatus=false">
-                        </div>
-                        <div class="control-line">
-                            <label>加密等级</label>
-                            <input type="number" v-model.number="globalLogisticsStatus.blue_encryption_level" min="0" @focus="isEditingGlobalLogisticsStatus=true" @blur="isEditingGlobalLogisticsStatus=false">
-                            <button @click="setLogisticsProtocolState('blue')">同步协议字段</button>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-
             <!-- 战场状态 -->
             <section class="panel battlefield">
-                <h3>战场状态</h3>
+                <h3>旧版战场工具（本次仅血量进入基础报文）</h3>
                 <div class="unit-group">
                     <div class="unit-card">
                         <h4>基地血量</h4>
@@ -342,11 +432,11 @@
                         <div class="hp-text">{{ getBaseHp(baseTeam) }} / 5000</div>
 
                         <div class="control-line">
-                            <label>当前护盾值</label>
+                            <label>旧版护盾输入（基础报文不发送）</label>
                             <input type="number" v-model.number="baseShieldForm.shield" min="0" @focus="isEditingBaseShieldForm=true" @blur="isEditingBaseShieldForm=false">
                         </div>
                         <div class="actions">
-                            <button @click="setBaseProtocolState(baseTeam, { shield: baseShieldForm.shield ,status: 0})">发送护盾值</button>
+                            <button @click="setBaseProtocolState(baseTeam, { shield: baseShieldForm.shield ,status: 0})">应用旧版输入</button>
                         </div>
                         <div class="actions">
                             <button @click="changeBaseHp(baseTeam, -50)">-50</button>
@@ -654,7 +744,7 @@
             <section class="panel robots">
                 <div class="robots-grid">
                 <div class="team-section">
-                    <h3>红队 (ID 1 / 3 / 6 / 7)</h3>
+                    <h3>红队基础数据 (ID 1 / 3 / 4 / 5 / 6 / 7)</h3>
                     <div class="robot-list">
                         <div v-for="card in getTeamRobotCards('red')" :key="card.robotId"
                             class="robot-card red-card">
@@ -687,11 +777,11 @@
                                         @focus="startEditRobotDetail(card.index)"
                                         @blur="finishEditRobotDetail(card.index)"
                                         @input="setDetail(card.index)"></label>
-                                <label>热量: <input type="number" v-model.number="globalUnitStatus.robot_heat[card.index]"
+                                <label>热量: <input type="number" v-model.number="globalUnitStatus.robot_heat[card.index]" min="0" step="0.1"
                                         @focus="startEditRobotDetail(card.index)"
                                         @blur="finishEditRobotDetail(card.index)"
                                         @input="setDetail(card.index, { holdHeat: true })"></label>
-                                <label>剩余弹量: <input type="number" v-model.number="globalUnitStatus.robot_bullets[card.index]"
+                                <label>全局剩余累计发弹量 (P-002): <input type="number" v-model.number="globalUnitStatus.robot_bullets[card.index]" min="-2147483648" max="2147483647" step="1"
                                         @focus="startEditRobotDetail(card.index)"
                                         @blur="finishEditRobotDetail(card.index)"
                                         @input="setDetail(card.index)"></label>
@@ -713,7 +803,7 @@
                 </div>
 
                 <div class="team-section">
-                    <h3>蓝队 (ID 101 / 103 / 106 / 107)</h3>
+                    <h3>蓝队基础数据 (ID 101 / 103 / 104 / 105 / 106 / 107)</h3>
                     <div class="robot-list">
                         <div v-for="card in getTeamRobotCards('blue')" :key="card.robotId"
                             class="robot-card blue-card">
@@ -746,11 +836,11 @@
                                         @focus="startEditRobotDetail(card.index)"
                                         @blur="finishEditRobotDetail(card.index)"
                                         @input="setDetail(card.index)"></label>
-                                <label>热量: <input type="number" v-model.number="globalUnitStatus.robot_heat[card.index]"
+                                <label>热量: <input type="number" v-model.number="globalUnitStatus.robot_heat[card.index]" min="0" step="0.1"
                                         @focus="startEditRobotDetail(card.index)"
                                         @blur="finishEditRobotDetail(card.index)"
                                         @input="setDetail(card.index, { holdHeat: true })"></label>
-                                <label>剩余弹量: <input type="number" v-model.number="globalUnitStatus.robot_bullets[card.index]"
+                                <label>全局剩余累计发弹量 (P-002): <input type="number" v-model.number="globalUnitStatus.robot_bullets[card.index]" min="-2147483648" max="2147483647" step="1"
                                         @focus="startEditRobotDetail(card.index)"
                                         @blur="finishEditRobotDetail(card.index)"
                                         @input="setDetail(card.index)"></label>
@@ -1150,66 +1240,6 @@
                     <button @click="setIndustrialVideo">切换</button>
                 </div>
             </section>
-            <!-- 机器人状态控制 -->
-            <section class="panel score-economy">
-                <h3>机器人状态发送</h3>
-                <p class="hint">按协议完整设置 RobotStaticStatus / RobotDynamicStatus / RobotModuleStatus，点击按钮后触发发送 MQTT。</p>
-                <div class="score-control-grid robot-status-grid">
-                    <div class="score-control-card robot-status-card">
-                        <h4>RobotStaticStatus</h4>
-                        <div class="control-line"><label>连接状态</label><input type="number" v-model.number="robotStaticStatusForm.connection_state" min="0"></div>
-                        <div class="control-line"><label>上场状态</label><input type="number" v-model.number="robotStaticStatusForm.field_state" min="0"></div>
-                        <div class="control-line"><label>存活状态</label><input type="number" v-model.number="robotStaticStatusForm.alive_state" min="0"></div>
-                        <div class="control-line"><label>机器人id</label><input type="number" v-model.number="robotStaticStatusForm.robot_id" min="0"></div>
-                        <div class="control-line"><label>机器人类型</label><input type="number" v-model.number="robotStaticStatusForm.robot_type" min="0"></div>
-                        <div class="control-line"><label>发射机构</label><input type="number" v-model.number="robotStaticStatusForm.performance_system_shooter" min="0"></div>
-                        <div class="control-line"><label>底盘</label><input type="number" v-model.number="robotStaticStatusForm.performance_system_chassis" min="0"></div>
-                        <div class="control-line"><label>当前等级</label><input type="number" v-model.number="robotStaticStatusForm.level" min="0"></div>
-                        <div class="control-line"><label>最大血量</label><input type="number" v-model.number="robotStaticStatusForm.max_health" min="0"></div>
-                        <div class="control-line"><label>最大热量</label><input type="number" v-model.number="robotStaticStatusForm.max_heat" min="0"></div>
-                        <div class="control-line"><label>热量冷却速率</label><input type="number" v-model.number="robotStaticStatusForm.heat_cooldown_rate" min="0" step="0.1"></div>
-                        <div class="control-line"><label>最大功率</label><input type="number" v-model.number="robotStaticStatusForm.max_power" min="0"></div>
-                        <div class="control-line"><label>最大缓冲能量</label><input type="number" v-model.number="robotStaticStatusForm.max_buffer_energy" min="0"></div>
-                        <div class="control-line"><label>最大底盘能量</label><input type="number" v-model.number="robotStaticStatusForm.max_chassis_energy" min="0"></div>
-                        <div class="actions"><button @click="sendRobotStaticStatus">发送静态状态</button></div>
-                    </div>
-                    <div class="score-control-card robot-status-card">
-                        <h4>RobotDynamicStatus</h4>
-                        <div class="control-line"><label>当前血量</label><input type="number" v-model.number="robotDynamicStatusForm.current_health" min="0"></div>
-                        <div class="control-line"><label>当前热量</label><input type="number" v-model.number="robotDynamicStatusForm.current_heat" min="0" step="0.1"></div>
-                        <div class="control-line"><label>上一次弹丸射速</label><input type="number" v-model.number="robotDynamicStatusForm.last_projectile_fire_rate" min="0" step="0.1"></div>
-                        <div class="control-line"><label>当前剩余底盘能量</label><input type="number" v-model.number="robotDynamicStatusForm.current_chassis_energy" min="0"></div>
-                        <div class="control-line"><label>当前缓冲能量</label><input type="number" v-model.number="robotDynamicStatusForm.current_buffer_energy" min="0"></div>
-                        <div class="control-line"><label>当前经验值</label><input type="number" v-model.number="robotDynamicStatusForm.current_experience" min="0"></div>
-                        <div class="control-line"><label>距离下一次升级仍需获得的经验</label><input type="number" v-model.number="robotDynamicStatusForm.experience_for_upgrade" min="0"></div>
-                        <div class="control-line"><label>累计已发弹量 </label><input type="number" v-model.number="robotDynamicStatusForm.total_projectiles_fired" min="0"></div>
-                        <div class="control-line"><label>剩余允许发弹量</label><input type="number" v-model.number="robotDynamicStatusForm.remaining_ammo" min="0"></div>
-                        <div class="control-line"><label>是否处于脱战状态</label><select v-model.number="robotDynamicStatusForm.is_out_of_combat"><option :value="0">0</option><option :value="1">1</option></select></div>
-                        <div class="control-line"><label>脱战状态倒计时</label><input type="number" v-model.number="robotDynamicStatusForm.out_of_combat_countdown" min="0"></div>
-                        <div class="control-line"><label>是否可以远程补血</label><select v-model.number="robotDynamicStatusForm.can_remote_heal"><option :value="0">0</option><option :value="1">1</option></select></div>
-                        <div class="control-line"><label>是否可以远程补弹</label><select v-model.number="robotDynamicStatusForm.can_remote_ammo"><option :value="0">0</option><option :value="1">1</option></select></div>
-                        <div class="actions"><button @click="sendRobotDynamicStatus">发送动态状态</button></div>
-                    </div>
-                    <div class="score-control-card robot-status-card">
-                        <h4>RobotModuleStatus</h4>
-                        <div class="control-line"><label>电源管理</label><input type="number" v-model.number="robotModuleStatusForm.power_manager" min="0"></div>
-                        <div class="control-line"><label>rfid</label><input type="number" v-model.number="robotModuleStatusForm.rfid" min="0"></div>
-                        <div class="control-line"><label>灯条</label><input type="number" v-model.number="robotModuleStatusForm.light_strip" min="0"></div>
-                        <div class="control-line"><label>17mm 发射机构</label><input type="number" v-model.number="robotModuleStatusForm.small_shooter" min="0"></div>
-                        <div class="control-line"><label>42mm 发射机构</label><input type="number" v-model.number="robotModuleStatusForm.big_shooter" min="0"></div>
-                        <div class="control-line"><label>定位模块</label><input type="number" v-model.number="robotModuleStatusForm.uwb" min="0"></div>
-                        <div class="control-line"><label>装甲</label><input type="number" v-model.number="robotModuleStatusForm.armor" min="0"></div>
-                        <div class="control-line"><label>图传</label><input type="number" v-model.number="robotModuleStatusForm.video_transmission" min="0"></div>
-                        <div class="control-line"><label>电容</label><input type="number" v-model.number="robotModuleStatusForm.capacitor" min="0"></div>
-                        <div class="control-line"><label>主控</label><input type="number" v-model.number="robotModuleStatusForm.main_controller" min="0"></div>
-                        <div class="control-line"><label>激光检测</label><input type="number" v-model.number="robotModuleStatusForm.laser_detection_module" min="0"></div>
-                        <div class="actions"><button @click="sendRobotModuleStatus">发送模块状态</button></div>
-                    </div>
-                </div>
-            </section>
-
-
-
             <!-- 日志 -->
             <section class="panel logs">
                 <h3>系统日志</h3>

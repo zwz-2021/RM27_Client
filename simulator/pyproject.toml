@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rm27-referee-simulator"
 version = "0.1.0"
-description = "Independent upstream RM26 simulator port for RM27 client development"
+description = "RM27 basic-data simulator with retained upstream RM26 tools"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {file = "LICENSE"}

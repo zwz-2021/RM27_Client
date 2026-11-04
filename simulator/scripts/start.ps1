@@ -10,7 +10,7 @@ param(
     [ValidateRange(1,65535)][int]$MqttPort = 3333,
     [string]$MqttHost = '127.0.0.1',
     [string]$TargetIP = '127.0.0.1',
-    [ValidateSet(1,2,3,4,5,6,7,101,102,103,104,105,106,107)][int]$CurrentRobotId = 1,
+    [ValidateSet(1,3,4,5,6,7,101,103,104,105,106,107)][int]$CurrentRobotId = 1,
     [string]$Python = 'python'
 )
 
