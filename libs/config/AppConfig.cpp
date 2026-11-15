@@ -6,6 +6,8 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QStringList>
+#include <QRegularExpression>
+#include "domain/BasicData.h"
 
 #include <cmath>
 
@@ -82,19 +84,54 @@ ConfigResult loadConfig(const QString &path)
     }
 
     const QJsonObject object = document.object();
-    QString error = checkKeys(object, {"mode", "window", "simulation", "logging"});
+    QString error = checkKeys(object, {"mode", "seat", "window", "simulation", "logging", "mqtt"});
     if (!error.isEmpty()) {
         return failure(error);
     }
     if (!object.value("mode").isString()) {
-        return failure(QStringLiteral("字段 mode 必须是字符串：official 或 simulation。"));
+        return failure(QStringLiteral("字段 mode 必须是字符串：official、simulation 或 preview。"));
     }
     const auto mode = domain::parseRunMode(object.value("mode").toString().toStdString());
     if (!mode) {
-        return failure(QStringLiteral("字段 mode 仅支持 official 或 simulation；回放尚未实现。"));
+        return failure(QStringLiteral("字段 mode 仅支持 official、simulation 或 preview；回放尚未实现。"));
     }
     AppConfig config;
     config.mode = *mode;
+    if (*mode == domain::RunMode::Simulation) config.mqtt.host = QStringLiteral("127.0.0.1");
+
+    if (object.contains("seat")) {
+        const auto seat = object.value("seat").toString();
+        if (seat == QStringLiteral("infantry")) {
+            config.seat = domain::OperatorSeat::Infantry;
+        } else if (seat != QStringLiteral("unspecified")) {
+            return failure(QStringLiteral("字段 seat 仅支持字符串 infantry 或 unspecified。"));
+        }
+    }
+
+    QJsonObject mqtt;
+    error = readSection(object, QStringLiteral("mqtt"),
+                        {"host", "port", "robotId", "connectTimeoutMs"}, mqtt);
+    if (!error.isEmpty()) return failure(error);
+    if (mqtt.contains("host")) {
+        const auto host = mqtt.value("host");
+        if (!host.isString() || host.toString().isEmpty() || host.toString().size() > 253
+            || host.toString().contains(QRegularExpression(QStringLiteral("[\\s/\\\\]")))) {
+            return failure(QStringLiteral("字段 mqtt.host 必须是无空白、无协议前缀的主机名或 IP。"));
+        }
+        config.mqtt.host = host.toString();
+    }
+    error = readInteger(mqtt, "port", "mqtt.port", 1, 65535, config.mqtt.port);
+    if (!error.isEmpty()) return failure(error);
+    error = readInteger(mqtt, "robotId", "mqtt.robotId", 1, 109, config.mqtt.robotId);
+    if (!error.isEmpty()) return failure(error);
+    const auto identity = domain::identifyRobot(config.mqtt.robotId);
+    if (!identity || identity->role == domain::RobotRole::Reserved
+        || identity->role == domain::RobotRole::Base || identity->role == domain::RobotRole::Outpost) {
+        return failure(QStringLiteral("mqtt.robotId 须为机器人 1、3–9 或蓝方对应 +100；本地选择不代表官方授权。"));
+    }
+    error = readInteger(mqtt, "connectTimeoutMs", "mqtt.connectTimeoutMs", 100, 60000,
+                        config.mqtt.connectTimeoutMs);
+    if (!error.isEmpty()) return failure(error);
 
     QJsonObject window;
     error = readSection(object, QStringLiteral("window"), {"title", "width", "height"}, window);

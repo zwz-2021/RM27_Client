@@ -8,7 +8,8 @@
         "RM27_CMAKE_ROOT": "D:/Qt6/Tools/CMake_64",
         "RM27_QT_ROOT": "D:/Qt6/6.11.2/mingw_64",
         "RM27_MINGW_ROOT": "D:/Qt6/Tools/mingw1310_64",
-        "RM27_NINJA_ROOT": "D:/Qt6/Tools/Ninja"
+        "RM27_NINJA_ROOT": "D:/Qt6/Tools/Ninja",
+        "PATH": "$env{RM27_QT_ROOT}/bin;$env{RM27_MINGW_ROOT}/bin;$env{RM27_NINJA_ROOT};$penv{PATH}"
       }
     },
     {
@@ -18,7 +19,8 @@
         "RM27_CMAKE_ROOT": "D:/Qt6/Tools/CMake_64",
         "RM27_QT_ROOT": "D:/Qt6/6.11.2/mingw_64",
         "RM27_MINGW_ROOT": "D:/Qt6/Tools/mingw1310_64",
-        "RM27_NINJA_ROOT": "D:/Qt6/Tools/Ninja"
+        "RM27_NINJA_ROOT": "D:/Qt6/Tools/Ninja",
+        "PATH": "$env{RM27_QT_ROOT}/bin;$env{RM27_MINGW_ROOT}/bin;$env{RM27_NINJA_ROOT};$penv{PATH}"
       }
     }
   ],

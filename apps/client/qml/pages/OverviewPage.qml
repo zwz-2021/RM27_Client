@@ -6,9 +6,18 @@ import "../components"
 
 ScrollView {
   id: root
+  objectName: "overviewPage"
   required property ClientViewModel viewModel
   contentWidth: availableWidth
   clip: true
+
+  Shortcut {
+    sequence: "F6"
+    context: Qt.WindowShortcut
+    enabled: root.visible && root.viewModel.infantrySeat
+    autoRepeat: false
+    onActivated: root.viewModel.requestBusinessAction()
+  }
 
   ColumnLayout {
     width: root.availableWidth
@@ -16,12 +25,14 @@ ScrollView {
 
     InfoCard {
       Layout.fillWidth: true
-      heading: "数据源"
+      heading: root.viewModel.sourceText
       value: root.viewModel.connectionText
+      valueObjectName: "connectionValue"
       description: root.viewModel.connectionDetail
     }
 
     RowLayout {
+      Layout.fillWidth: true
       spacing: 12
       Button {
         objectName: "startButton"
@@ -35,41 +46,142 @@ ScrollView {
         enabled: root.viewModel.active
         onClicked: root.viewModel.stop()
       }
+      Button {
+        objectName: "competitionActionButton"
+        text: "赛事操作 (F6)"
+        visible: root.viewModel.infantrySeat
+        onClicked: root.viewModel.requestBusinessAction()
+      }
       Label {
         Layout.fillWidth: true
-        text: "模拟模式可直接预览数据更新。"
+        text: root.viewModel.preview
+          ? "内置心跳仅用于界面预览。"
+          : "订阅就绪后仍需等待数据；过期和缺失值显示 —。"
         color: "#526078"
         wrapMode: Text.Wrap
       }
     }
 
+    Label {
+      Layout.fillWidth: true
+      objectName: "actionFeedbackLabel"
+      text: root.viewModel.actionFeedback
+      visible: root.viewModel.infantrySeat && text.length > 0
+      wrapMode: Text.Wrap
+    }
+
+    Label {
+      Layout.fillWidth: true
+      objectName: "diagnosticLabel"
+      visible: root.viewModel.diagnosticText.length > 0
+      text: root.viewModel.diagnosticText
+      color: "#b42318"
+      wrapMode: Text.WrapAnywhere
+    }
+
     GridLayout {
       Layout.fillWidth: true
-      columns: root.availableWidth >= 800 ? 2 : 1
+      visible: !root.viewModel.preview
+      columns: root.availableWidth >= 900 ? 2 : 1
       columnSpacing: 16
       rowSpacing: 16
 
       InfoCard {
         Layout.fillWidth: true
         Layout.preferredWidth: 1
-        heading: "演示心跳序号"
-        value: root.viewModel.sequenceText
-        description: "用于确认数据源到界面的更新链路。"
+        heading: "当前机器人血量 · " + root.viewModel.dynamicStatusText
+        value: root.viewModel.healthText
+        valueObjectName: "healthValue"
+        description: root.viewModel.dynamicSummary
       }
       InfoCard {
         Layout.fillWidth: true
         Layout.preferredWidth: 1
-        heading: "本次模拟运行时间"
-        value: root.viewModel.elapsedText
-        description: "停止后清空，再次启动从零计时。"
+        heading: "机器人身份与静态状态"
+        value: root.viewModel.robotIdentityText
+        valueObjectName: "identityValue"
+        description: root.viewModel.staticSummary
+      }
+      InfoCard {
+        Layout.fillWidth: true
+        Layout.preferredWidth: 1
+        heading: "比赛状态"
+        value: root.viewModel.gameText
+        valueObjectName: "gameValue"
+        description: root.viewModel.gameSummary
+      }
+      InfoCard {
+        Layout.fillWidth: true
+        Layout.preferredWidth: 1
+        heading: "己方当前经济"
+        value: root.viewModel.economyText
+        valueObjectName: "economyValue"
+        description: root.viewModel.logisticsSummary
       }
     }
 
     InfoCard {
       Layout.fillWidth: true
-      heading: "业务工作区"
-      value: "等待接入比赛状态与图传"
-      description: "后续在这里添加机器人状态、地图、视频画面与操作面板。当前心跳仅用于本地开发，不代表赛事数据。"
+      visible: !root.viewModel.preview
+      heading: "全局血量与剩余累计发弹量"
+      description: root.viewModel.unitsSummary
+    }
+
+    Frame {
+      Layout.fillWidth: true
+      visible: !root.viewModel.preview
+      padding: 20
+      ColumnLayout {
+        anchors.fill: parent
+        spacing: 10
+        Label { text: "逐消息接收状态"; font.bold: true }
+        Repeater {
+          model: root.viewModel.topicStates
+          delegate: RowLayout {
+            required property var modelData
+            Layout.fillWidth: true
+            Label {
+              Layout.fillWidth: true
+              text: modelData.topic
+              wrapMode: Text.WrapAnywhere
+              color: "#526078"
+            }
+            Label {
+              objectName: modelData.topic + "Status"
+              text: modelData.state
+              color: modelData.stale ? "#b45309" : (modelData.received ? "#067647" : "#748096")
+            }
+          }
+        }
+        Label {
+          Layout.fillWidth: true
+          text: "当前为五类基础数据接收页；命令、图传、完整比赛工作台按后续步骤开发。"
+          color: "#748096"
+          wrapMode: Text.Wrap
+        }
+      }
+    }
+
+    GridLayout {
+      Layout.fillWidth: true
+      visible: root.viewModel.preview
+      columns: root.availableWidth >= 900 ? 2 : 1
+      columnSpacing: 16
+      rowSpacing: 16
+      InfoCard {
+        Layout.fillWidth: true
+        Layout.preferredWidth: 1
+        heading: "演示心跳序号"
+        value: root.viewModel.sequenceText
+        description: "用于确认内置预览到界面的更新链路。"
+      }
+      InfoCard {
+        Layout.fillWidth: true
+        Layout.preferredWidth: 1
+        heading: "本次预览运行时间"
+        value: root.viewModel.elapsedText
+        description: "停止后清空，再次启动从零计时。"
+      }
     }
   }
 }

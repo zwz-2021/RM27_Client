@@ -4,7 +4,7 @@ param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Debug',
 
-    [ValidateSet('official', 'simulation')]
+    [ValidateSet('official', 'simulation', 'preview')]
     [string]$Mode = 'official',
 
     [string]$ConfigFile,
@@ -41,6 +41,9 @@ try {
     }
     elseif ($Mode -eq 'simulation') {
         $clientArguments += @('--config', (Join-Path $projectRoot 'configs/simulation.example.json'))
+    }
+    elseif ($Mode -eq 'preview') {
+        $clientArguments += @('--config', (Join-Path $projectRoot 'configs/preview.example.json'))
     }
     if ($LogDirectory) {
         if (-not [IO.Path]::IsPathRooted($LogDirectory)) {

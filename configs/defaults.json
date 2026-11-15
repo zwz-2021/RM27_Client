@@ -1,5 +1,6 @@
 {
   "mode": "official",
+  "mqtt": { "host": "192.168.12.1", "port": 3333, "robotId": 1, "connectTimeoutMs": 5000 },
   "window": {
     "title": "RM27 Client",
     "width": 1280,

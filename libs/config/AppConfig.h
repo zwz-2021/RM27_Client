@@ -1,5 +1,6 @@
 #pragma once
 
+#include "domain/OperatorSeat.h"
 #include "domain/RunMode.h"
 #include <QString>
 #include <optional>
@@ -21,11 +22,20 @@ struct LoggingConfig {
     QString directory;
 };
 
+struct MqttConfig {
+    QString host = QStringLiteral("192.168.12.1");
+    int port = 3333;
+    int robotId = 1;
+    int connectTimeoutMs = 5000;
+};
+
 struct AppConfig {
     domain::RunMode mode = domain::RunMode::Official;
     WindowConfig window;
     SimulationConfig simulation;
     LoggingConfig logging;
+    MqttConfig mqtt;
+    domain::OperatorSeat seat = domain::OperatorSeat::Unspecified;
 };
 
 struct ConfigResult {

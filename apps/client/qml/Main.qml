@@ -33,6 +33,12 @@ ApplicationWindow {
       }
       Item { Layout.fillWidth: true }
       Label {
+        objectName: "seatLabel"
+        text: root.viewModel.seatText
+        visible: text.length > 0
+        font.bold: true
+      }
+      Label {
         objectName: "modeLabel"
         text: root.viewModel.modeText
         color: "#526078"
@@ -69,7 +75,7 @@ ApplicationWindow {
     }
     Label {
       Layout.fillWidth: true
-      text: "开发骨架 · Qt Quick / C++17"
+      text: root.viewModel.preview ? "开发预览 · 无外部比赛数据" : "五类基础消息接收"
       color: "#748096"
       font.pixelSize: 12
     }

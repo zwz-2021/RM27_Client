@@ -1,0 +1,5 @@
+{
+  "mode": "simulation",
+  "seat": "infantry",
+  "mqtt": { "robotId": 3 }
+}

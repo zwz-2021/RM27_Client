@@ -10,6 +10,9 @@ std::optional<RunMode> parseRunMode(std::string_view value)
     if (value == "simulation") {
         return RunMode::Simulation;
     }
+    if (value == "preview") {
+        return RunMode::Preview;
+    }
     return std::nullopt;
 }
 

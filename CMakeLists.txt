@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(RM27Client VERSION 0.1.0 LANGUAGES CXX)
+project(RM27Client VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,8 +13,9 @@ if(MSVC)
     add_compile_options(/utf-8)
 endif()
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Network Gui Qml Quick QuickControls2)
 include(cmake/Protobuf.cmake)
+include(cmake/PahoMqtt.cmake)
 include(CTest)
 
 # 依赖方向由各模块 target_link_libraries 明确声明。

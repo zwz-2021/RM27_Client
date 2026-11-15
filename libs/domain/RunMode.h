@@ -5,7 +5,7 @@
 
 namespace rm27::domain {
 
-enum class RunMode { Official, Simulation };
+enum class RunMode { Official, Simulation, Preview };
 
 std::optional<RunMode> parseRunMode(std::string_view value);
 

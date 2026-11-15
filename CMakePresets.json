@@ -16,11 +16,9 @@
       "name": "windows-mingw",
       "hidden": true,
       "inherits": "base",
-      "environment": {
-        "PATH": "$env{RM27_QT_ROOT}/bin;$env{RM27_MINGW_ROOT}/bin;$env{RM27_NINJA_ROOT};$penv{PATH}"
-      },
       "cacheVariables": {
         "CMAKE_PREFIX_PATH": "$env{RM27_QT_ROOT}",
+        "CMAKE_C_COMPILER": "$env{RM27_MINGW_ROOT}/bin/gcc.exe",
         "CMAKE_CXX_COMPILER": "$env{RM27_MINGW_ROOT}/bin/g++.exe",
         "CMAKE_MAKE_PROGRAM": "$env{RM27_NINJA_ROOT}/ninja.exe"
       },

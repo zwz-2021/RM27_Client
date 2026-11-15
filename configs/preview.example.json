@@ -1,0 +1,6 @@
+{
+  "mode": "preview",
+  "window": { "title": "RM27 Client - Preview", "width": 1280, "height": 800 },
+  "simulation": { "intervalMs": 1000 },
+  "logging": { "directory": "../logs" }
+}

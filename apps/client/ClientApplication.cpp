@@ -5,6 +5,7 @@
 #include "diagnostics/JsonlLogger.h"
 #include "presentation/ClientViewModel.h"
 #include "transport/MockDataSource.h"
+#include "transport/MqttDataSource.h"
 #include "transport/UnavailableDataSource.h"
 
 #include <QCommandLineParser>
@@ -80,17 +81,31 @@ int ClientApplication::run(QGuiApplication &app)
 
     // 对象按声明顺序构建、逆序销毁：数据源比会话活得更久，QML 最先销毁。
     std::unique_ptr<application::IDataSource> source;
-    if (result.config && settings.mode == domain::RunMode::Simulation) {
+    if (result.config && settings.mode == domain::RunMode::Preview) {
         source = std::make_unique<transport::MockDataSource>(settings.simulation.intervalMs);
+    } else if (result.config) {
+        source = std::make_unique<transport::MqttDataSource>(settings.mqtt.host,
+            settings.mqtt.port, settings.mqtt.robotId, settings.mqtt.connectTimeoutMs);
     } else {
         source = std::make_unique<transport::UnavailableDataSource>();
     }
     application::ClientSession session(*source);
+    if (result.config) {
+        session.configureIdentity(settings.mqtt.robotId, settings.mode == domain::RunMode::Preview
+            ? QStringLiteral("内置演示心跳（不连接 MQTT）")
+            : QStringLiteral("MQTT %1:%2 · 连接机器人 clientID %3 · 终端 IP 由系统配置")
+                  .arg(settings.mqtt.host).arg(settings.mqtt.port).arg(settings.mqtt.robotId),
+            settings.seat);
+    }
     QObject::connect(&session, &application::ClientSession::stateChanged, &session, [&] {
         if (logOpen && !logger.write(QStringLiteral("info"), QStringLiteral("session.state"),
                                      session.connectionDetail())) {
             qWarning().noquote() << logger.errorString();
         }
+    });
+    QObject::connect(&session, &application::ClientSession::diagnosticChanged, &session, [&] {
+        if (logOpen && !logger.write(QStringLiteral("warning"), QStringLiteral("session.diagnostic"),
+                                     session.diagnostic())) qWarning().noquote() << logger.errorString();
     });
     presentation::ClientViewModel viewModel(session,
         result.config ? std::optional<domain::RunMode>(settings.mode) : std::nullopt,

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "domain/ClientSnapshot.h"
+#include "domain/BasicState.h"
 #include "domain/ConnectionState.h"
 
 #include <QMetaType>
@@ -9,6 +10,7 @@
 
 Q_DECLARE_METATYPE(rm27::domain::ClientSnapshot)
 Q_DECLARE_METATYPE(rm27::domain::ConnectionState)
+Q_DECLARE_METATYPE(rm27::domain::BasicMessage)
 
 namespace rm27::application {
 
@@ -28,6 +30,10 @@ public:
 signals:
     void connectionChanged(rm27::domain::ConnectionState state, const QString &detail);
     void snapshotReceived(const rm27::domain::ClientSnapshot &snapshot);
+    // Age is measured from transport reception on a monotonic clock, including
+    // time spent waiting for SUBACK or the Qt event loop. Not server time.
+    void basicMessageReceived(const rm27::domain::BasicMessage &message, qint64 ageMs = 0);
+    void diagnosticReceived(const QString &detail);
 };
 
 } // namespace rm27::application

@@ -7,6 +7,7 @@ Frame {
   required property string heading
   property string value: ""
   property string description: ""
+  property string valueObjectName: ""
   padding: 20
 
   background: Rectangle {
@@ -19,11 +20,14 @@ Frame {
     anchors.fill: parent
     spacing: 12
     Label {
+      Layout.fillWidth: true
       text: root.heading
       color: "#526078"
       font.pixelSize: 14
+      wrapMode: Text.WrapAnywhere
     }
     Label {
+      objectName: root.valueObjectName
       Layout.fillWidth: true
       visible: root.value.length > 0
       text: root.value

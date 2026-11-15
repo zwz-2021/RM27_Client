@@ -5,6 +5,8 @@
 
 #include <QObject>
 #include <QString>
+#include <QVariantMap>
+#include <QVariantList>
 #include <optional>
 
 namespace rm27::presentation {
@@ -22,6 +24,23 @@ class ClientViewModel : public QObject {
     Q_PROPERTY(QString elapsedText READ elapsedText NOTIFY snapshotChanged)
     Q_PROPERTY(QString startupError READ startupError CONSTANT)
     Q_PROPERTY(QString logPath READ logPath CONSTANT)
+    Q_PROPERTY(bool preview READ preview CONSTANT)
+    Q_PROPERTY(QString sourceText READ sourceText NOTIFY identityChanged)
+    Q_PROPERTY(QString seatText READ seatText NOTIFY identityChanged)
+    Q_PROPERTY(bool infantrySeat READ infantrySeat NOTIFY identityChanged)
+    Q_PROPERTY(QString actionFeedback READ actionFeedback NOTIFY actionFeedbackChanged)
+    Q_PROPERTY(QString diagnosticText READ diagnosticText NOTIFY diagnosticChanged)
+    Q_PROPERTY(QString healthText READ healthText NOTIFY basicStateChanged)
+    Q_PROPERTY(QString dynamicStatusText READ dynamicStatusText NOTIFY basicStateChanged)
+    Q_PROPERTY(QString dynamicSummary READ dynamicSummary NOTIFY basicStateChanged)
+    Q_PROPERTY(QString robotIdentityText READ robotIdentityText NOTIFY basicStateChanged)
+    Q_PROPERTY(QString staticSummary READ staticSummary NOTIFY basicStateChanged)
+    Q_PROPERTY(QString gameText READ gameText NOTIFY basicStateChanged)
+    Q_PROPERTY(QString gameSummary READ gameSummary NOTIFY basicStateChanged)
+    Q_PROPERTY(QString economyText READ economyText NOTIFY basicStateChanged)
+    Q_PROPERTY(QString logisticsSummary READ logisticsSummary NOTIFY basicStateChanged)
+    Q_PROPERTY(QString unitsSummary READ unitsSummary NOTIFY basicStateChanged)
+    Q_PROPERTY(QVariantList topicStates READ topicStates NOTIFY basicStateChanged)
 
 public:
     ClientViewModel(application::ClientSession &session,
@@ -38,13 +57,38 @@ public:
     QString elapsedText() const;
     QString startupError() const;
     QString logPath() const;
+    bool preview() const;
+    QString sourceText() const;
+    QString seatText() const;
+    bool infantrySeat() const;
+    QString actionFeedback() const;
+    QString diagnosticText() const;
+    QString healthText() const;
+    QString dynamicStatusText() const;
+    QString dynamicSummary() const;
+    QString robotIdentityText() const;
+    QString staticSummary() const;
+    QString gameText() const;
+    QString gameSummary() const;
+    QString economyText() const;
+    QString logisticsSummary() const;
+    QString unitsSummary() const;
+    QVariantList topicStates() const;
+
+    // Read-only evidence from the same projection displayed by QML.
+    Q_INVOKABLE QVariantMap basicEvidence() const;
 
     Q_INVOKABLE void start();
     Q_INVOKABLE void stop();
+    Q_INVOKABLE void requestBusinessAction();
 
 signals:
     void stateChanged();
     void snapshotChanged();
+    void basicStateChanged();
+    void diagnosticChanged();
+    void identityChanged();
+    void actionFeedbackChanged();
 
 private:
     application::ClientSession &session_;

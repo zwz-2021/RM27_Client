@@ -16,9 +16,9 @@ ScrollView {
 
     InfoCard {
       Layout.fillWidth: true
-      heading: "当前模式"
+      heading: "当前模式与来源"
       value: root.viewModel.modeText
-      description: "通过启动参数 --config 选择配置文件，更改配置后重新启动客户端。"
+      description: root.viewModel.sourceText + "\n通过启动参数 --config 选择配置文件，更改身份或地址后重新启动客户端。"
     }
     Frame {
       Layout.fillWidth: true
@@ -44,8 +44,9 @@ ScrollView {
     }
     InfoCard {
       Layout.fillWidth: true
-      heading: "扩展入口"
-      description: "比赛状态：libs/domain\n通信接入：libs/transport 与 libs/protocol\n视频链路：libs/video\n界面数据：libs/presentation\n页面与组件：apps/client/qml"
+      heading: "最近诊断"
+      description: root.viewModel.diagnosticText.length > 0
+        ? root.viewModel.diagnosticText : "暂无诊断。数据接收情况请查看工作台中的逐消息状态。"
     }
   }
 }
