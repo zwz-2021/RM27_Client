@@ -101,6 +101,13 @@ def exercise_clients(base_url, mqtt_host, mqtt_port, video_directory):
                 "RobotDynamicStatus": base_pb.RobotDynamicStatus,
                 "RobotPerformanceSelectionSync": pb.RobotPerformanceSelectionSync}
     uploaded_file = None
+    video_error_update = threading.Event()
+
+    @console.on("update")
+    def on_console_update(state):
+        video = state.get("videoStatus", {})
+        if video.get("error") and not video["is_streaming"]:
+            video_error_update.set()
 
     def on_connect(client, userdata, flags, reason_code, properties):
         if reason_code == 0:
@@ -214,6 +221,15 @@ def exercise_clients(base_url, mqtt_host, mqtt_port, video_directory):
         require(uploaded_file.is_file() and uploaded_file.read_bytes() == sample,
                 "Upload was not saved inside the isolated video directory")
         require(name in get_json("/api/state")["videos"], "Uploaded video is not listed")
+        for command in ({"command": "set_video", "filename": name},
+                        {"command": "video_control", "action": "start"}):
+            reply = console.call("referee_command", command, timeout=5)
+            require(reply.get("ok"), f"Video command rejected: {reply}")
+        require(video_error_update.wait(5), "WebSocket did not report the invalid uploaded video")
+        failed = get_json("/api/state")["videoStatus"]
+        require(failed["current_video"] == name and not failed["is_streaming"] and failed["error"],
+                "Console state does not expose the stopped video and error")
+        print(f"WebSocket reported the video source failure: {failed['error']}")
     finally:
         try:
             if console.connected:

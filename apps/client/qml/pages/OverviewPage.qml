@@ -210,7 +210,7 @@ ScrollView {
         }
         Label {
           Layout.fillWidth: true
-          text: "当前为五类基础数据接收页；命令、图传、完整比赛工作台按后续步骤开发。"
+          text: root.viewModel.infantrySeat ? "图传 UDP 收包计数可在“运行信息”查看。" : "当前显示五类基础消息的接收状态。"
           color: "#748096"
           wrapMode: Text.Wrap
         }

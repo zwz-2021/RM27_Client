@@ -530,6 +530,7 @@ if (!hasSocketIo || !hasVue) {
         customVideoUrl: '',
         videoStatus: {
             is_streaming: false,
+            error: '',
             paused: false,
             current_video: '',
             frame_id: 0

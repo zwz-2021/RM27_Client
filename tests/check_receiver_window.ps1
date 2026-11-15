@@ -8,7 +8,7 @@ param(
     [ValidateSet('Debug', 'Release')][string]$Configuration = 'Debug'
 )
 $ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName UIAutomationClient
+. (Join-Path $PSScriptRoot 'qt_window_helpers.ps1')
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
@@ -20,27 +20,6 @@ public static class ReceiverWindowKeys {
 $evidence = Split-Path -Parent $ConfigFile
 $log = Join-Path $evidence "$Phase-window.jsonl"
 $utf8 = New-Object System.Text.UTF8Encoding($false)
-
-function Get-Controls {
-    $query = [Diagnostics.Stopwatch]::StartNew()
-    while ($true) {
-        try {
-            $items = @{}
-            $client.Refresh()
-            $window = [System.Windows.Automation.AutomationElement]::FromHandle($client.MainWindowHandle)
-            foreach ($element in $window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
-                     [System.Windows.Automation.Condition]::TrueCondition)) {
-                $id = $element.Current.AutomationId
-                if ($id) { $items[$id.Split('.')[-1]] = $element }
-            }
-            return $items
-        } catch [System.Windows.Automation.ElementNotAvailableException], [Runtime.InteropServices.COMException] {
-            # Qt may rebuild the accessibility tree when a feedback label appears or disappears.
-            if ($query.Elapsed.TotalSeconds -ge 2) { throw }
-            Start-Sleep -Milliseconds 50
-        }
-    }
-}
 
 function Wait-View([string]$Description, [scriptblock]$Condition) {
     $timer = [Diagnostics.Stopwatch]::StartNew()
@@ -62,12 +41,6 @@ function Wait-View([string]$Description, [scriptblock]$Condition) {
         Start-Sleep -Milliseconds 100
     } while ($timer.Elapsed.TotalSeconds -lt 12)
     throw "$Description timed out. Last view: $(ConvertTo-Json $text -Compress)"
-}
-
-function Invoke-Control([string]$Name) {
-    $element = (Get-Controls)[$Name]
-    if (-not $element -or -not $element.Current.IsEnabled) { throw "$Name is unavailable" }
-    $element.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
 }
 
 function Select-BlueThree {
@@ -97,20 +70,7 @@ function Wait-Receiving([int]$Robot, [string]$Health, [string]$Seat) {
     }
 }
 
-$entry = Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts/run.ps1'
-$launcher = Start-Process powershell.exe -PassThru -WindowStyle Hidden -ArgumentList @(
-    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $entry + '"'), '-SkipBuild',
-    '-Configuration', $Configuration, '-ConfigFile', ('"' + $ConfigFile + '"'),
-    '-LogDirectory', ('"' + $evidence + '"'))
-$client = $null
-try {
-    $timer = [Diagnostics.Stopwatch]::StartNew()
-    while (-not $client -and -not $launcher.HasExited -and $timer.Elapsed.TotalSeconds -lt 15) {
-        $client = Get-Process -Name RM27_Client -ErrorAction SilentlyContinue |
-            Where-Object { $_.MainWindowTitle -eq $WindowTitle } | Select-Object -First 1
-        if (-not $client) { Start-Sleep -Milliseconds 100 }
-    }
-    if (-not $client) { throw "No product window for $WindowTitle" }
+function Test-ProfileWindow($client) {
     $infantry = '本地席位 · 步兵（只读）'
     $legacy = '本地席位 · 未指定（只读）'
     if ($Phase -eq 'save') {
@@ -161,26 +121,12 @@ try {
         }
         Stop-Receiving
     }
+}
+
+try {
+    $closed = Invoke-ProductWindow $ConfigFile $WindowTitle $Configuration $evidence ${function:Test-ProfileWindow}
+    [IO.File]::AppendAllText($log, (ConvertTo-Json $closed -Compress) + [Environment]::NewLine, $utf8)
 } catch {
     [IO.File]::WriteAllText((Join-Path $evidence "$Phase-error.txt"), "$($_.Exception.Message)`n$($_.ScriptStackTrace)", $utf8)
     throw
-} finally {
-    if (-not $client -and -not $launcher.HasExited) {
-        # An invalid config may leave a window with the default title. Scope cleanup to this launcher.
-        $child = Get-CimInstance Win32_Process -Filter "Name='RM27_Client.exe' AND ParentProcessId=$($launcher.Id)" |
-            Select-Object -First 1
-        if ($child) { $client = Get-Process -Id $child.ProcessId -ErrorAction SilentlyContinue }
-    }
-    if ($client -and -not $client.HasExited) { [void]$client.CloseMainWindow() }
-    if (-not $launcher.WaitForExit(7000)) {
-        if ($client -and -not $client.HasExited) { $client.Kill() }
-        $launcher.Kill()
-        throw 'Product failed to exit normally'
-    }
-    if ($launcher.ExitCode -ne 0) { throw "Launcher returned $($launcher.ExitCode)" }
-    if ($client) {
-        if (-not $client.HasExited) { throw "Product PID $($client.Id) still active" }
-        $closed = @{ observation = 'closed'; productPid = $client.Id; launcherPid = $launcher.Id }
-        [IO.File]::AppendAllText($log, (ConvertTo-Json $closed -Compress) + [Environment]::NewLine, $utf8)
-    }
 }

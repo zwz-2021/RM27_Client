@@ -64,9 +64,14 @@ async def verify(configuration, evidence):
     services.push_async_callback(broker.shutdown)
     try:
         port = broker._servers["default"].instance.sockets[0].getsockname()[1]
+        # The saved infantry seat also starts a video receiver. Keep it off the default UDP port.
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            video_port = probe.getsockname()[1]
         title = "RM27 profile test " + uuid.uuid4().hex
         legacy = {"mode": "simulation", "window": {"title": title, "width": 800, "height": 600},
                   "logging": {"directory": "relative-logs"}, "simulation": {"intervalMs": 735},
+                  "video": {"bindAddress": "127.0.0.1", "port": video_port},
                   "mqtt": {"host": "127.0.0.1", "port": port, "robotId": 3, "connectTimeoutMs": 1800}}
         config = evidence / "personal.json"
         config.write_text(json.dumps(legacy, indent=2), encoding="utf-8")

@@ -14,6 +14,34 @@ ScrollView {
     width: root.availableWidth
     spacing: 16
 
+    Frame {
+      Layout.fillWidth: true
+      visible: root.viewModel.infantrySeat
+      padding: 20
+      ColumnLayout {
+        anchors.fill: parent
+        spacing: 8
+        Label { text: "图传 UDP 收包"; font.bold: true }
+        Label {
+          objectName: "udpBindingLabel"
+          Layout.fillWidth: true
+          text: root.viewModel.udpBindingText
+          wrapMode: Text.WrapAnywhere
+        }
+        Label {
+          objectName: "udpCountersLabel"
+          Layout.fillWidth: true
+          text: root.viewModel.udpCountersText
+          wrapMode: Text.Wrap
+        }
+        Label {
+          objectName: "udpHeaderLabel"
+          Layout.fillWidth: true
+          text: root.viewModel.udpHeaderText
+          wrapMode: Text.WrapAnywhere
+        }
+      }
+    }
     InfoCard {
       Layout.fillWidth: true
       heading: "当前模式与来源"

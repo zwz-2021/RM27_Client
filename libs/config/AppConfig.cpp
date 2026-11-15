@@ -3,6 +3,7 @@
 #include <QCryptographicHash>
 #include <QFile>
 #include <QFileInfo>
+#include <QHostAddress>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
@@ -94,7 +95,7 @@ ConfigResult readConfig(const QString &source, QJsonObject &object)
     }
 
     object = document.object();
-    QString error = checkKeys(object, {"mode", "seat", "window", "simulation", "logging", "mqtt"});
+    QString error = checkKeys(object, {"mode", "seat", "window", "simulation", "logging", "mqtt", "video"});
     if (!error.isEmpty()) {
         return failure(error);
     }
@@ -107,7 +108,10 @@ ConfigResult readConfig(const QString &source, QJsonObject &object)
     }
     AppConfig config;
     config.mode = *mode;
-    if (*mode == domain::RunMode::Simulation) config.mqtt.host = QStringLiteral("127.0.0.1");
+    if (*mode == domain::RunMode::Simulation) {
+        config.mqtt.host = QStringLiteral("127.0.0.1");
+        config.video.bindAddress = QStringLiteral("127.0.0.1");
+    }
 
     if (object.contains("seat")) {
         const auto seat = object.value("seat").toString();
@@ -117,6 +121,19 @@ ConfigResult readConfig(const QString &source, QJsonObject &object)
             return failure(QStringLiteral("字段 seat 仅支持字符串 infantry 或 unspecified。"));
         }
     }
+
+    QJsonObject video;
+    error = readSection(object, QStringLiteral("video"), {"bindAddress", "port"}, video);
+    if (!error.isEmpty()) return failure(error);
+    if (video.contains("bindAddress")) {
+        const QHostAddress address(video.value("bindAddress").toString());
+        if (address.protocol() != QAbstractSocket::IPv4Protocol) {
+            return failure(QStringLiteral("字段 video.bindAddress 必须是本机 IPv4 地址。"));
+        }
+        config.video.bindAddress = address.toString();
+    }
+    error = readInteger(video, "port", "video.port", 1, 65535, config.video.port);
+    if (!error.isEmpty()) return failure(error);
 
     QJsonObject mqtt;
     error = readSection(object, QStringLiteral("mqtt"),

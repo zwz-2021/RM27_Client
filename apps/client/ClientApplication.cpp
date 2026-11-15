@@ -6,6 +6,7 @@
 #include "presentation/ClientViewModel.h"
 #include "transport/MockDataSource.h"
 #include "transport/MqttDataSource.h"
+#include "transport/UdpVideoReceiver.h"
 #include "transport/UnavailableDataSource.h"
 
 #include <QCommandLineParser>
@@ -99,6 +100,7 @@ int ClientApplication::run(QGuiApplication &app)
     } else {
         source = std::make_unique<transport::UnavailableDataSource>();
     }
+    transport::UdpVideoReceiver udp;
     application::ClientSession session(*source);
     if (result.config) configureIdentity(session, settings);
     QObject::connect(&session, &application::ClientSession::stateChanged, &session, [&] {
@@ -114,6 +116,32 @@ int ClientApplication::run(QGuiApplication &app)
     presentation::ClientViewModel viewModel(session,
         result.config ? std::optional<domain::RunMode>(settings.mode) : std::nullopt,
         startupError, logPath);
+    const auto logVideo = [&](const QString &level, const QString &event, const QString &detail) {
+        if (logOpen && !logger.write(level, event, detail)) qWarning().noquote() << logger.errorString();
+    };
+    using video::UdpVideoState;
+    QObject::connect(&udp, &transport::UdpVideoReceiver::statusChanged, &viewModel, [&] {
+        const auto &status = udp.status();
+        viewModel.setUdpStatus(status);
+        if (status.state == UdpVideoState::ReadFailed)
+            logVideo(QStringLiteral("warning"), QStringLiteral("video.read_failed"), viewModel.udpBindingText());
+    });
+    // MQTT 重订阅仍属于同一次操作员会话；UDP 在每次会话开始时只绑定一次。
+    QObject::connect(&session, &application::ClientSession::stateChanged, &viewModel, [&] {
+        const auto &status = udp.status();
+        if (session.active()) {
+            if (session.seat() != domain::OperatorSeat::Infantry || settings.mode == domain::RunMode::Preview
+                || status.state != UdpVideoState::Stopped) return;
+            const bool bound = udp.start(settings.video.bindAddress, static_cast<quint16>(settings.video.port));
+            logVideo(bound ? QStringLiteral("info") : QStringLiteral("warning"),
+                     bound ? QStringLiteral("video.bound") : QStringLiteral("video.bind_failed"),
+                     viewModel.udpBindingText());
+        } else if (status.state != UdpVideoState::Stopped) {
+            logVideo(QStringLiteral("info"), QStringLiteral("video.stopped"),
+                     QStringLiteral("有效包 %1 · 丢弃 %2").arg(status.validPackets).arg(status.droppedPackets()));
+            udp.stop();
+        }
+    });
     auto *mqttSource = qobject_cast<transport::MqttDataSource *>(source.get());
     if (mqttSource && config::isEditableConfigPath(configPath)) {
         viewModel.setPersonalConfigEditor(QFileInfo(configPath).absoluteFilePath(),

@@ -63,8 +63,8 @@ ApplicationWindow {
     TabBar {
       id: tabs
       Layout.fillWidth: true
-      TabButton { text: "工作台" }
-      TabButton { text: "运行信息" }
+      TabButton { objectName: "overviewTab"; text: "工作台" }
+      TabButton { objectName: "diagnosticsTab"; text: "运行信息" }
     }
     StackLayout {
       Layout.fillWidth: true

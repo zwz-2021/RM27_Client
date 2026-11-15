@@ -30,12 +30,18 @@ struct MqttConfig {
     int connectTimeoutMs = 5000;
 };
 
+struct VideoConfig {
+    QString bindAddress = QStringLiteral("192.168.12.2");
+    int port = 3334;
+};
+
 struct AppConfig {
     domain::RunMode mode = domain::RunMode::Official;
     WindowConfig window;
     SimulationConfig simulation;
     LoggingConfig logging;
     MqttConfig mqtt;
+    VideoConfig video;
     domain::OperatorSeat seat = domain::OperatorSeat::Unspecified;
 };
 

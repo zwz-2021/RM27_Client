@@ -204,7 +204,7 @@
             </section>
 
 
-            <section class="panel legacy-notice"><h3>以下保留旧版演示和开发工具</h3><p>自动比赛、角色操作、地图、视频、判罚等尚未按本路线迁移和验证。它们不在本次支持清单中，旧控制字段不会混入已迁移的基础消息。</p></section>
+            <section class="panel legacy-notice"><h3>演示和开发工具</h3><p>“图传控制”可向步兵只读客户端发送 HEVC 测试视频，在客户端的“运行信息”查看收包情况。自动比赛、角色操作、地图、工业相机和判罚仍沿用旧版演示。</p></section>
 
             <section id="simulationStage" class="panel simulation-stage" :class="{ 'is-fullscreen': isMapFullscreen }">
                 <div class="simulation-toolbar">
@@ -1174,6 +1174,7 @@
                     </span>
                     <span v-if="videoStatus.is_streaming" style="margin-left: 15px;">帧号: {{ videoStatus.frame_id }}</span>
                     <span style="margin-left: 15px;">当前视频: {{ videoStatus.current_video || '未设置' }}</span>
+                    <div v-if="videoStatus.error" role="alert">{{ videoStatus.error }}</div>
                 </div>
 
                 <!-- 推流控制按钮 -->

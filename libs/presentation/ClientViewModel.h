@@ -2,6 +2,7 @@
 
 #include "application/ClientSession.h"
 #include "domain/RunMode.h"
+#include "video/UdpVideoStatus.h"
 
 #include <QObject>
 #include <QString>
@@ -35,6 +36,9 @@ class ClientViewModel : public QObject {
     Q_PROPERTY(QString configFeedback READ configFeedback NOTIFY configFeedbackChanged)
     Q_PROPERTY(QString actionFeedback READ actionFeedback NOTIFY actionFeedbackChanged)
     Q_PROPERTY(QString diagnosticText READ diagnosticText NOTIFY diagnosticChanged)
+    Q_PROPERTY(QString udpBindingText READ udpBindingText NOTIFY udpChanged)
+    Q_PROPERTY(QString udpCountersText READ udpCountersText NOTIFY udpChanged)
+    Q_PROPERTY(QString udpHeaderText READ udpHeaderText NOTIFY udpChanged)
     Q_PROPERTY(QString healthText READ healthText NOTIFY basicStateChanged)
     Q_PROPERTY(QString dynamicStatusText READ dynamicStatusText NOTIFY basicStateChanged)
     Q_PROPERTY(QString dynamicSummary READ dynamicSummary NOTIFY basicStateChanged)
@@ -73,6 +77,10 @@ public:
     void setPersonalConfigEditor(QString path, std::function<QString(int)> save);
     QString actionFeedback() const;
     QString diagnosticText() const;
+    void setUdpStatus(const video::UdpVideoStatus &status);
+    QString udpBindingText() const;
+    QString udpCountersText() const;
+    QString udpHeaderText() const;
     QString healthText() const;
     QString dynamicStatusText() const;
     QString dynamicSummary() const;
@@ -98,6 +106,7 @@ signals:
     void snapshotChanged();
     void basicStateChanged();
     void diagnosticChanged();
+    void udpChanged();
     void identityChanged();
     void actionFeedbackChanged();
     void personalConfigPathChanged();
@@ -111,6 +120,7 @@ private:
     QString personalConfigPath_;
     std::function<QString(int)> saveConfig_;
     QString configFeedback_;
+    video::UdpVideoStatus udpStatus_;
 };
 
 } // namespace rm27::presentation

@@ -1,5 +1,6 @@
 {
   "mode": "simulation",
   "seat": "infantry",
-  "mqtt": { "robotId": 3 }
+  "mqtt": { "robotId": 3 },
+  "video": { "bindAddress": "127.0.0.1", "port": 3334 }
 }

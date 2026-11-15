@@ -39,6 +39,7 @@ void checkPersonalConfig(const QString &path)
     const QByteArray old = R"({
         "mode":"simulation","window":{"title":" 窗口 ","width":1150},
         "mqtt":{"host":"localhost","connectTimeoutMs":750,"port":15558},
+        "video":{"bindAddress":"127.0.0.1","port":15334},
         "logging":{"directory":"../log dir"},"simulation":{"intervalMs":215}
     })";
     put(path, old);
@@ -58,7 +59,8 @@ void checkPersonalConfig(const QString &path)
     const auto reopened = config::loadConfig(path);
     require(reopened.config && reopened.revision == saved.revision
             && reopened.config->seat == domain::OperatorSeat::Infantry
-            && reopened.config->mqtt.robotId == 103 && reopened.config->mqtt.port == 15558,
+            && reopened.config->mqtt.robotId == 103 && reopened.config->mqtt.port == 15558
+            && reopened.config->video.port == 15334 && reopened.config->video.bindAddress == "127.0.0.1",
             "reopened selection differs");
     const auto good = get(path);
     for (const int id : {0, 2, 10, 102, 111, 65536}) {
@@ -109,8 +111,11 @@ void checkRejectedSources(const QTemporaryDir &dir)
     const auto converted = config::saveInfantryConfig(path, 105, opened.revision);
     const auto reopened = config::loadConfig(path);
     require(converted.config && reopened.config && reopened.config->mode == domain::RunMode::Official
-            && reopened.config->mqtt.robotId == 105, "legacy configuration without mqtt");
+            && reopened.config->mqtt.robotId == 105 && reopened.config->video.port == 3334
+            && reopened.config->video.bindAddress == "192.168.12.2", "legacy official configuration");
     for (const QByteArray &contents : {QByteArray("{"), QByteArray(R"({"mode":"official","extra":2})"),
+                                       QByteArray(R"({"mode":"simulation","video":{"port":65536}})"),
+                                       QByteArray(R"({"mode":"simulation","video":{"bindAddress":"localhost"}})"),
                                        QByteArray(R"({"mode":"official","mqtt":{"port":0}})"),
                                        QByteArray(R"({"mode":"official","mqtt":{"extra":2}})")}) {
         put(path, contents);

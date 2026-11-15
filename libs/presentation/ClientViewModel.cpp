@@ -106,6 +106,46 @@ ClientViewModel::ClientViewModel(application::ClientSession &session,
             this, &ClientViewModel::actionFeedbackChanged);
 }
 
+void ClientViewModel::setUdpStatus(const video::UdpVideoStatus &status)
+{
+    udpStatus_ = status;
+    emit udpChanged();
+}
+
+QString ClientViewModel::udpBindingText() const
+{
+    const QString endpoint = QStringLiteral("%1:%2").arg(udpStatus_.bindAddress).arg(udpStatus_.bindPort);
+    switch (udpStatus_.state) {
+    case video::UdpVideoState::Bound:
+        return QStringLiteral("已绑定 %1").arg(endpoint);
+    case video::UdpVideoState::BindFailed:
+        return QStringLiteral("绑定失败 %1 · %2\n请检查本机网卡地址和端口占用，然后停止并重新启动数据源。")
+            .arg(endpoint, udpStatus_.error);
+    case video::UdpVideoState::ReadFailed:
+        return QStringLiteral("接收中断 %1 · %2\n请检查网卡，然后停止并重新启动数据源。")
+            .arg(endpoint, udpStatus_.error);
+    case video::UdpVideoState::Stopped:
+        return QStringLiteral("已停止");
+    }
+    return {};
+}
+
+QString ClientViewModel::udpCountersText() const
+{
+    return QStringLiteral("有效包 %1 · 丢弃 %2（短包 %3 · 超长 %4 · 空载 %5 · 帧长矛盾 %6）")
+        .arg(udpStatus_.validPackets).arg(udpStatus_.droppedPackets()).arg(udpStatus_.shortPackets)
+        .arg(udpStatus_.oversizedPackets).arg(udpStatus_.emptyPayloadPackets).arg(udpStatus_.inconsistentFramePackets);
+}
+
+QString ClientViewModel::udpHeaderText() const
+{
+    if (!udpStatus_.lastHeader) return QStringLiteral("尚未收到有效包");
+    const auto &header = *udpStatus_.lastHeader;
+    return QStringLiteral("最近有效包 · 来源 %1:%2 · 整包 %3 字节 · 帧号 %4 · 分片号 %5 · 整帧 %6 字节")
+        .arg(udpStatus_.lastSourceAddress).arg(udpStatus_.lastSourcePort).arg(udpStatus_.lastPacketBytes)
+        .arg(header.frameId).arg(header.fragmentIndex).arg(header.frameBytes);
+}
+
 QString ClientViewModel::modeText() const
 {
     if (!mode_) return QStringLiteral("未确定（配置错误）");

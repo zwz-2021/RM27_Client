@@ -26,7 +26,6 @@
 """
 
 import socket
-import struct
 import threading
 import time
 import os
@@ -36,6 +35,8 @@ import queue
 from pathlib import Path
 
 from .hevc_annexb import HevcAnnexBFrameExtractor
+from .video_datagrams import send_video_frame
+
 
 class VideoStreamer:
     """
@@ -44,14 +45,6 @@ class VideoStreamer:
     使用 FFmpeg 将视频转码为 HEVC 格式，通过 UDP 发送给客户端。
     遵循官方协议：8字节包头 + HEVC 数据
     """
-
-    # UDP 最佳负载大小 (MTU 1500 - IP头20 - UDP头8 - 协议头8)
-    MAX_PAYLOAD_SIZE = 1464
-
-    # 包头格式: 帧编号(H 2B), 分片序号(H 2B), 帧总字节数(I 4B)
-    # 使用大端序 (!)
-    HEADER_FORMAT = "!HHI"
-    HEADER_SIZE = 8  # 2 + 2 + 4 = 8 字节
 
     def __init__(self, target_ip="127.0.0.1", port=3334, video_dir=None):
         """
@@ -78,6 +71,7 @@ class VideoStreamer:
         self._worker = None
         self._stop_event = threading.Event()
         self.paused = False  # 暂停状态
+        self.error = ""
 
         # FFmpeg 进程
         self.ffmpeg_process = None
@@ -160,33 +154,40 @@ class VideoStreamer:
 
     def start_streaming(self):
         """开始推流 (由 Web 界面手动触发)"""
-        if not self.current_video:
-            self._log("错误: 未设置视频源")
-            return False
-
-        if not os.path.exists(self.current_video):
-            self._log(f"错误: 视频文件不存在: {self.current_video}")
-            return False
-
-        self.is_streaming = True
-        self.paused = False
+        with self._process_lock:
+            if self.is_streaming:
+                return True
+            if not self.current_video or not os.path.isfile(self.current_video):
+                self.error = "请先选择可读取的视频文件。"
+                return False
+            self.error = ""
+            self.is_streaming = True
+            self.paused = False
         self._log(f"开始推流: {self.current_video}")
         return True
 
     def stop_streaming(self):
         """停止推流"""
-        self.is_streaming = False
+        with self._process_lock:
+            self.is_streaming = False
+            self.paused = False
         self._stop_ffmpeg()
         self._log("推流已停止")
 
     def pause(self):
         """暂停推流"""
-        self.paused = True
+        with self._process_lock:
+            if not self.is_streaming:
+                return
+            self.paused = True
         self._log("推流已暂停")
 
     def resume(self):
         """恢复推流"""
-        self.paused = False
+        with self._process_lock:
+            if not self.is_streaming:
+                return
+            self.paused = False
         self._log("推流已恢复")
 
     def set_video_file(self, filename):
@@ -229,12 +230,14 @@ class VideoStreamer:
 
     def get_status(self):
         """获取当前状态"""
-        return {
-            "is_streaming": self.is_streaming,
-            "paused": self.paused,
-            "current_video": os.path.basename(self.current_video) if self.current_video else "",
-            "frame_id": self.frame_id
-        }
+        with self._process_lock:
+            return {
+                "is_streaming": self.is_streaming,
+                "paused": self.paused,
+                "current_video": os.path.basename(self.current_video) if self.current_video else "",
+                "frame_id": self.frame_id,
+                "error": self.error,
+            }
 
     def _start_ffmpeg(self):
         """启动 FFmpeg 进程进行 HEVC 转码"""
@@ -272,12 +275,20 @@ class VideoStreamer:
             self.frame_extractor.reset()
             self._log("FFmpeg HEVC 编码器已启动")
             return True
-        except FileNotFoundError:
-            self._log("错误: FFmpeg 未安装或不在 PATH 中")
+        except OSError as error:
+            self._fail_stream(None, f"无法启动 FFmpeg，请检查安装和 PATH。{error}")
             return False
-        except Exception as e:
-            self._log(f"启动 FFmpeg 失败: {e}")
-            return False
+
+    def _fail_stream(self, process, detail):
+        # 停止后重启时，旧进程的 EOF/异常不能覆盖新一轮状态。
+        with self._process_lock:
+            if not self.is_streaming or self.ffmpeg_process is not process:
+                return
+            self.is_streaming = False
+            self.paused = False
+            self.error = detail
+        self._log(detail)
+        self._stop_ffmpeg()
 
     def _stop_ffmpeg(self):
         """停止 FFmpeg 进程并回收 stdout。"""
@@ -300,6 +311,7 @@ class VideoStreamer:
 
     def _stream_loop(self):
         """推流主循环"""
+        sent_frame = False
         while self.running:
             # 等待开始推流
             if not self.is_streaming:
@@ -314,8 +326,8 @@ class VideoStreamer:
             # 启动 FFmpeg (如果尚未启动)
             if not self.ffmpeg_process:
                 if not self._start_ffmpeg():
-                    self.is_streaming = False
                     continue
+                sent_frame = False
 
             try:
                 # 读取连续 HEVC Annex-B 码流，并提取访问单元后发送
@@ -323,60 +335,33 @@ class VideoStreamer:
                 if process is None:
                     continue
                 data = process.stdout.read(4096)
-                if not self.running or not self.is_streaming:
+                if not self.is_streaming or self.ffmpeg_process is not process:
                     continue
 
                 if not data:
                     for frame in self.frame_extractor.flush():
                         self._send_frame(frame)
-                    self._log("FFmpeg 输出结束，重启...")
-                    self._stop_ffmpeg()
+                        sent_frame = True
+                    code = process.wait(timeout=2)
+                    if code:
+                        self._fail_stream(process, f"FFmpeg 未能完成视频转码（退出码 {code}），请检查视频文件。")
+                    elif not sent_frame:
+                        self._fail_stream(process, "FFmpeg 没有输出视频帧，请检查视频文件。")
+                    else:
+                        self._stop_ffmpeg()
                     continue
 
                 for frame in self.frame_extractor.push(data):
                     self._send_frame(frame)
+                    sent_frame = True
 
             except Exception as e:
-                if self.running and self.is_streaming:
-                    self._log(f"推流错误: {e}")
-                self._stop_ffmpeg()
-                self._stop_event.wait(1)
+                self._fail_stream(process, f"图传发送失败：{e}")
 
     def _send_frame(self, data):
-        """
-        发送一帧数据 (按官方协议分片)
-
-        协议头格式 (8字节):
-            帧编号（2 字节，递增）
-            分片序号（2 字节）
-            当前帧总字节数（4 字节）
-        """
-        data_len = len(data)
-        max_chunk_data = self.MAX_PAYLOAD_SIZE - self.HEADER_SIZE
-        total_chunks = (data_len + max_chunk_data - 1) // max_chunk_data
-
-        for chunk_id in range(total_chunks):
-            start = chunk_id * max_chunk_data
-            end = min(start + max_chunk_data, data_len)
-            chunk_data = data[start:end]
-
-            # 构建官方协议头 (8字节)
-            header = struct.pack(
-                self.HEADER_FORMAT,
-                self.frame_id % 65536,  # 帧编号 (2B)
-                chunk_id,               # 分片序号 (2B)
-                data_len                # 帧总字节数 (4B)
-            )
-
-            packet = header + chunk_data
-
-            try:
-                self.sock.sendto(packet, (self.target_ip, self.port))
-            except Exception as e:
-                self._log(f"UDP 发送错误: {e}")
-                break
-
-        if self.frame_id % 60 == 0:
-            self._log(f"已发送帧 {self.frame_id}, 大小 {data_len}B, 分片 {total_chunks}")
-
+        frame_id = self.frame_id
         self.frame_id = (self.frame_id + 1) % 65536
+        count, _ = send_video_frame(self.sock, (self.target_ip, self.port), frame_id, data)
+
+        if frame_id % 60 == 0:
+            self._log(f"已发送帧 {frame_id}, 大小 {len(data)}B, 分片 {count}")

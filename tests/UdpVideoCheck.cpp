@@ -1,0 +1,115 @@
+#include "transport/UdpVideoReceiver.h"
+
+#include <QSignalSpy>
+#include <QTest>
+#include <QUdpSocket>
+
+using rm27::transport::UdpVideoReceiver;
+using rm27::video::UdpVideoState;
+
+class UdpVideoCheck final : public QObject {
+    Q_OBJECT
+private slots:
+    void wireSamples();
+    void exclusiveBindAndRestart();
+    void burst();
+};
+
+void UdpVideoCheck::wireSamples()
+{
+    UdpVideoReceiver receiver;
+    const auto &s = receiver.status();
+    QVERIFY(receiver.start(QStringLiteral("127.0.0.1"), 0));
+    QVERIFY(s.state == UdpVideoState::Bound && s.bindPort != 0 && s.error.isEmpty() && !s.lastHeader);
+    QSignalSpy changes(&receiver, &UdpVideoReceiver::statusChanged);
+    QUdpSocket sender;
+    const auto send = [&](const QByteArray &packet) {
+        QCOMPARE(sender.writeDatagram(packet, QHostAddress::LocalHost, s.bindPort), packet.size());
+    };
+
+    for (int size = 0; size < 8; ++size)
+        send(QByteArray(size, 'x'));
+    send(QByteArray::fromHex("ffff000000000001"));      // complete header, no stream data
+    send(QByteArray::fromHex("0001000100000001aabb"));  // two bytes in a one-byte frame
+    send(QByteArray(1401, 'x'));
+    send(QByteArray(16384, 'x'));                      // truncated at the read boundary
+    QTRY_COMPARE(s.droppedPackets(), 12ULL);
+    QCOMPARE(s.shortPackets, 8ULL);
+    QCOMPARE(s.oversizedPackets, 2ULL);
+    QCOMPARE(s.emptyPayloadPackets, 1ULL);
+    QCOMPARE(s.inconsistentFramePackets, 1ULL);
+    QVERIFY(!s.lastHeader && !s.validPackets);
+
+    // Literal network bytes independent of the simulator. An untrusted frame length
+    // is reported verbatim and must never cause an allocation at the header stage.
+    send(QByteArray::fromHex("ffff0102f1020304") + QByteArray(1392, 'a'));
+    QTRY_COMPARE(s.validPackets, 1ULL);
+    QVERIFY(s.lastHeader);
+    QCOMPARE(s.lastHeader->frameId, 65535);
+    QCOMPARE(s.lastHeader->fragmentIndex, 0x0102);
+    QCOMPARE(s.lastHeader->frameBytes, 0xf1020304U);
+    QCOMPARE(s.lastSourceAddress, QStringLiteral("127.0.0.1"));
+    QCOMPARE(s.lastSourcePort, sender.localPort());
+    QCOMPARE(s.lastPacketBytes, 1400);
+    send(QByteArray::fromHex("0000000000000001ab"));
+    send(QByteArray(3, 'x'));
+    QTRY_COMPARE(s.shortPackets, 9ULL);
+    QCOMPARE(s.validPackets, 2ULL);
+    QCOMPARE(s.lastHeader->frameId, 0);
+    QCOMPARE(s.lastHeader->fragmentIndex, 0);
+    QCOMPARE(s.lastHeader->frameBytes, 1U);
+    QCOMPARE(s.lastPacketBytes, 9);
+    QTRY_VERIFY(!changes.isEmpty());
+}
+
+void UdpVideoCheck::exclusiveBindAndRestart()
+{
+    const QString address = QStringLiteral("127.0.0.1");
+    QUdpSocket holder;
+    UdpVideoReceiver receiver;
+    const auto &s = receiver.status();
+    QVERIFY(!receiver.start(QStringLiteral("invalid"), 3334));
+    QVERIFY(s.state == UdpVideoState::BindFailed && !s.error.isEmpty());
+    QVERIFY(holder.bind(QHostAddress::LocalHost, 0, QAbstractSocket::DontShareAddress));
+    const quint16 port = holder.localPort();
+    QVERIFY(!receiver.start(address, port));
+    QVERIFY(s.state == UdpVideoState::BindFailed && !s.error.isEmpty());
+    QCOMPARE(s.bindPort, port);
+    holder.close();
+    QVERIFY(receiver.start(address, port));
+    QVERIFY(s.state == UdpVideoState::Bound && s.error.isEmpty());
+    QUdpSocket sender;
+    const QByteArray one = QByteArray::fromHex("3456000100000001ab");
+    QCOMPARE(sender.writeDatagram(one, QHostAddress::LocalHost, port), one.size());
+    QTRY_COMPARE(s.validPackets, 1ULL);
+    QVERIFY(receiver.start(address, port));
+    QCOMPARE(s.validPackets, 1ULL);
+    QCOMPARE(sender.writeDatagram(one, QHostAddress::LocalHost, port), one.size());
+    receiver.stop(); // a datagram is still queued in the old socket
+    receiver.stop();
+    QVERIFY(s.state == UdpVideoState::Stopped && !s.lastHeader && s.lastSourceAddress.isEmpty() && !s.validPackets);
+    QVERIFY(holder.bind(QHostAddress::LocalHost, port, QAbstractSocket::DontShareAddress));
+    holder.close();
+    QVERIFY(receiver.start(address, port));
+    QCOMPARE(sender.writeDatagram(one, QHostAddress::LocalHost, port), one.size());
+    QTRY_COMPARE(s.validPackets, 1ULL);
+    QCOMPARE(s.droppedPackets(), 0ULL);
+    QCOMPARE(s.lastHeader->frameId, 0x3456);
+}
+
+void UdpVideoCheck::burst()
+{
+    UdpVideoReceiver receiver;
+    QVERIFY(receiver.start(QStringLiteral("127.0.0.1"), 0));
+    QSignalSpy changes(&receiver, &UdpVideoReceiver::statusChanged);
+    QUdpSocket sender;
+    const QByteArray one = QByteArray::fromHex("0001000100000001ab");
+    for (int i = 0; i < 96; ++i)
+        QCOMPARE(sender.writeDatagram(one, QHostAddress::LocalHost, receiver.status().bindPort), one.size());
+    QTRY_COMPARE(receiver.status().validPackets, 96ULL);
+    QTRY_VERIFY(!changes.isEmpty());
+    QVERIFY(changes.count() < 96);
+}
+
+QTEST_GUILESS_MAIN(UdpVideoCheck)
+#include "UdpVideoCheck.moc"
