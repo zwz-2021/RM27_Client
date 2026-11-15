@@ -18,7 +18,10 @@ ScrollView {
       Layout.fillWidth: true
       heading: "当前模式与来源"
       value: root.viewModel.modeText
-      description: root.viewModel.sourceText + "\n通过启动参数 --config 选择配置文件，更改身份或地址后重新启动客户端。"
+      description: root.viewModel.sourceText + (root.viewModel.preview || root.viewModel.startupError.length > 0 ? ""
+        : (root.viewModel.personalConfigPath.length > 0
+          ? "\n可在工作台停止数据源后更改接收机器人，并保存为步兵只读席位。"
+          : "\n如需保存步兵只读配置，请复制配置示例到个人 JSON 文件，并通过 --config 打开副本。"))
     }
     Frame {
       Layout.fillWidth: true

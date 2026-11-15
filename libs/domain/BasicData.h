@@ -16,6 +16,10 @@ struct RobotIdentity {
     RobotRole role;
 };
 
+// Appendix 2 robot IDs available for the local MQTT receiver configuration.
+inline constexpr std::array<int, 16> mqttRobotIds{
+    1, 3, 4, 5, 6, 7, 8, 9, 101, 103, 104, 105, 106, 107, 108, 109};
+
 // P-003, user instruction 2026-11-01: migrate RM26's static-message convention.
 // These numbers belong to RobotStaticStatus.robot_type, not RobotStatus.type.
 inline std::optional<RobotRole> robotRoleFromStaticType(std::uint32_t type)

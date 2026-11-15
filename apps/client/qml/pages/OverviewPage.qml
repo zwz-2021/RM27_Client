@@ -70,6 +70,61 @@ ScrollView {
       wrapMode: Text.Wrap
     }
 
+    Frame {
+      Layout.fillWidth: true
+      visible: root.viewModel.personalConfigPath.length > 0
+      padding: 12
+      ColumnLayout {
+        anchors.fill: parent
+        RowLayout {
+          Layout.fillWidth: true
+          Label { text: "接收机器人" }
+          ComboBox {
+            id: receiverBox
+            objectName: "receiverRobotBox"
+            Accessible.name: "接收机器人"
+            enabled: !root.viewModel.active
+            model: root.viewModel.receiverChoices
+            textRole: "label"
+            valueRole: "id"
+            implicitContentWidthPolicy: ComboBox.WidestTextWhenCompleted
+            Component.onCompleted: currentIndex = indexOfValue(root.viewModel.configuredRobotId)
+            Connections {
+              target: root.viewModel
+              function onIdentityChanged() {
+                receiverBox.currentIndex = receiverBox.indexOfValue(root.viewModel.configuredRobotId)
+              }
+              function onStateChanged() {
+                if (root.viewModel.active)
+                  receiverBox.currentIndex = receiverBox.indexOfValue(root.viewModel.configuredRobotId)
+              }
+            }
+          }
+          Button {
+            objectName: "saveReceiverButton"
+            text: "保存步兵只读配置"
+            enabled: !root.viewModel.active && receiverBox.currentIndex >= 0
+            onClicked: root.viewModel.saveInfantryConfig(receiverBox.currentValue)
+          }
+        }
+        Label {
+          Layout.fillWidth: true
+          text: (root.viewModel.active ? "停止数据源后可修改 · " : "个人配置 · ") + root.viewModel.personalConfigPath
+          textFormat: Text.PlainText
+          color: "#526078"
+          wrapMode: Text.WrapAnywhere
+        }
+        Label {
+          objectName: "configFeedbackLabel"
+          Layout.fillWidth: true
+          text: root.viewModel.configFeedback
+          textFormat: Text.PlainText
+          visible: text.length > 0
+          wrapMode: Text.WrapAnywhere
+        }
+      }
+    }
+
     Label {
       Layout.fillWidth: true
       objectName: "diagnosticLabel"

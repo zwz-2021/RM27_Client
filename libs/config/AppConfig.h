@@ -2,6 +2,7 @@
 
 #include "domain/OperatorSeat.h"
 #include "domain/RunMode.h"
+#include <QByteArray>
 #include <QString>
 #include <optional>
 
@@ -41,8 +42,11 @@ struct AppConfig {
 struct ConfigResult {
     std::optional<AppConfig> config;
     QString error;
+    QByteArray revision;
 };
 
 ConfigResult loadConfig(const QString &path);
+bool isEditableConfigPath(const QString &path);
+ConfigResult saveInfantryConfig(const QString &path, int robotId, const QByteArray &expectedRevision);
 
 } // namespace rm27::config

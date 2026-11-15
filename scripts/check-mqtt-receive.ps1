@@ -33,8 +33,8 @@ try {
     $oldPath = $env:PATH
     try {
         $env:PATH = (Join-Path $qtRoot 'bin') + ";$compilerBin;$oldPath"
-        & $ctest --test-dir $buildDirectory --output-on-failure -R '^basic_session$'
-        if ($LASTEXITCODE -ne 0) { throw 'Client state/session checks failed.' }
+        & $ctest --test-dir $buildDirectory --output-on-failure -R '^(basic_session|config_save)$'
+        if ($LASTEXITCODE -ne 0) { throw 'Client configuration or session checks failed.' }
         Push-Location -LiteralPath $projectRoot
         try {
             & $python (Join-Path $projectRoot 'tests/check_mqtt_receive.py') --client-check (Join-Path $buildDirectory 'bin/RM27_MqttCheck.exe') --cycles $Cycles

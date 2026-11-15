@@ -164,6 +164,12 @@ MqttDataSource::MqttDataSource(QString host, int port, int robotId, int connectT
 
 MqttDataSource::~MqttDataSource() { releaseAttempt(); }
 
+void MqttDataSource::setRobotIdWhileStopped(int robotId)
+{
+    Q_ASSERT(QThread::currentThread() == thread() && !active_);
+    if (!active_) robotId_ = robotId;
+}
+
 void MqttDataSource::start()
 {
     Q_ASSERT(QThread::currentThread() == thread());

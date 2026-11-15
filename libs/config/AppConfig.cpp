@@ -1,14 +1,18 @@
 #include "AppConfig.h"
 
+#include <QCryptographicHash>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
-#include <QStringList>
+#include <QLockFile>
 #include <QRegularExpression>
+#include <QSaveFile>
+#include <QStringList>
 #include "domain/BasicData.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace rm27::config {
@@ -55,11 +59,17 @@ QString readInteger(const QJsonObject &object, const QString &key, const QString
     return {};
 }
 
-} // namespace
-
-ConfigResult loadConfig(const QString &path)
+QString checkReceiveId(int robotId)
 {
-    const QString source = path.startsWith(":/") ? path : QFileInfo(path).absoluteFilePath();
+    if (std::find(domain::mqttRobotIds.begin(), domain::mqttRobotIds.end(), robotId)
+        == domain::mqttRobotIds.end()) {
+        return QStringLiteral("mqtt.robotId 须为机器人 1、3–9 或蓝方对应 +100；本地选择不代表官方授权。");
+    }
+    return {};
+}
+
+ConfigResult readConfig(const QString &source, QJsonObject &object)
+{
     const auto failure = [&source](const QString &reason) -> ConfigResult {
         return {std::nullopt, QStringLiteral("%1\n%2").arg(source, reason)};
     };
@@ -83,7 +93,7 @@ ConfigResult loadConfig(const QString &path)
         return failure(QStringLiteral("配置根节点必须是 JSON 对象。"));
     }
 
-    const QJsonObject object = document.object();
+    object = document.object();
     QString error = checkKeys(object, {"mode", "seat", "window", "simulation", "logging", "mqtt"});
     if (!error.isEmpty()) {
         return failure(error);
@@ -124,11 +134,8 @@ ConfigResult loadConfig(const QString &path)
     if (!error.isEmpty()) return failure(error);
     error = readInteger(mqtt, "robotId", "mqtt.robotId", 1, 109, config.mqtt.robotId);
     if (!error.isEmpty()) return failure(error);
-    const auto identity = domain::identifyRobot(config.mqtt.robotId);
-    if (!identity || identity->role == domain::RobotRole::Reserved
-        || identity->role == domain::RobotRole::Base || identity->role == domain::RobotRole::Outpost) {
-        return failure(QStringLiteral("mqtt.robotId 须为机器人 1、3–9 或蓝方对应 +100；本地选择不代表官方授权。"));
-    }
+    error = checkReceiveId(config.mqtt.robotId);
+    if (!error.isEmpty()) return failure(error);
     error = readInteger(mqtt, "connectTimeoutMs", "mqtt.connectTimeoutMs", 100, 60000,
                         config.mqtt.connectTimeoutMs);
     if (!error.isEmpty()) return failure(error);
@@ -180,7 +187,79 @@ ConfigResult loadConfig(const QString &path)
         config.logging.directory = logging.value("directory").toString();
     }
 
-    return {config, {}};
+    return {config, {}, QCryptographicHash::hash(contents, QCryptographicHash::Sha256)};
+}
+
+bool isTemplate(const QString &fileName)
+{
+    return fileName.compare(QStringLiteral("defaults.json"), Qt::CaseInsensitive) == 0
+        || fileName.endsWith(QStringLiteral(".example.json"), Qt::CaseInsensitive);
+}
+
+QString editableTarget(const QString &path)
+{
+    if (path.isEmpty() || path.startsWith(":/")) return {};
+    const QFileInfo file(path);
+    if (!file.isFile() || isTemplate(file.fileName())) return {};
+    const QString target = file.canonicalFilePath();
+    return isTemplate(QFileInfo(target).fileName()) ? QString{} : target;
+}
+
+} // namespace
+
+ConfigResult loadConfig(const QString &path)
+{
+    QJsonObject object;
+    return readConfig(path.startsWith(":/") ? path : QFileInfo(path).absoluteFilePath(), object);
+}
+
+bool isEditableConfigPath(const QString &path)
+{
+    return !editableTarget(path).isEmpty();
+}
+
+ConfigResult saveInfantryConfig(const QString &path, int robotId, const QByteArray &expectedRevision)
+{
+    const auto failure = [&path](const QString &reason) -> ConfigResult {
+        return {std::nullopt, QStringLiteral("%1\n%2").arg(path, reason), {}};
+    };
+    const QString target = editableTarget(path);
+    if (target.isEmpty()) {
+        return failure(QStringLiteral("请用个人配置启动。可将示例复制到 configs/local.json 后用 -ConfigFile 打开。"));
+    }
+    const QString error = checkReceiveId(robotId);
+    if (!error.isEmpty()) return failure(error);
+
+    // Serialize saves from different clients, then compare with the revision that the user opened.
+    QLockFile lock(target + QStringLiteral(".lock"));
+    if (!lock.tryLock(0)) {
+        return failure(lock.error() == QLockFile::LockFailedError
+            ? QStringLiteral("其他客户端正在保存此配置，请稍后重试。")
+            : QStringLiteral("无法在个人配置目录建立写锁，请检查目录写入权限。"));
+    }
+    QJsonObject object;
+    auto result = readConfig(target, object);
+    if (!result.config) return result;
+    if (result.revision != expectedRevision) {
+        return failure(QStringLiteral("个人配置已被修改，请重开客户端载入最新配置。"));
+    }
+    if (result.config->mode == domain::RunMode::Preview) {
+        return failure(QStringLiteral("预览模式没有 MQTT 接收身份。"));
+    }
+    object.insert(QStringLiteral("seat"), QStringLiteral("infantry"));
+    auto mqtt = object.value(QStringLiteral("mqtt")).toObject();
+    mqtt.insert(QStringLiteral("robotId"), robotId);
+    object.insert(QStringLiteral("mqtt"), mqtt);
+    const auto contents = QJsonDocument(object).toJson();
+    QSaveFile file(target);
+    file.setDirectWriteFallback(false);
+    if (!file.open(QIODevice::WriteOnly) || file.write(contents) != contents.size() || !file.commit()) {
+        return failure(QStringLiteral("无法保存个人配置：%1").arg(file.errorString()));
+    }
+    result.config->seat = domain::OperatorSeat::Infantry;
+    result.config->mqtt.robotId = robotId;
+    result.revision = QCryptographicHash::hash(contents, QCryptographicHash::Sha256);
+    return result;
 }
 
 } // namespace rm27::config

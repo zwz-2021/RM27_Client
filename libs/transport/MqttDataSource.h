@@ -18,6 +18,7 @@ public:
     MqttDataSource(QString host, int port, int robotId, int connectTimeoutMs,
                    QObject *parent = nullptr);
     ~MqttDataSource() override;
+    void setRobotIdWhileStopped(int robotId);
     void start() override;
     void stop() override;
 

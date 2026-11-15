@@ -7,6 +7,7 @@
 #include <QString>
 #include <QVariantMap>
 #include <QVariantList>
+#include <functional>
 #include <optional>
 
 namespace rm27::presentation {
@@ -28,6 +29,10 @@ class ClientViewModel : public QObject {
     Q_PROPERTY(QString sourceText READ sourceText NOTIFY identityChanged)
     Q_PROPERTY(QString seatText READ seatText NOTIFY identityChanged)
     Q_PROPERTY(bool infantrySeat READ infantrySeat NOTIFY identityChanged)
+    Q_PROPERTY(int configuredRobotId READ configuredRobotId NOTIFY identityChanged)
+    Q_PROPERTY(QVariantList receiverChoices READ receiverChoices CONSTANT)
+    Q_PROPERTY(QString personalConfigPath READ personalConfigPath NOTIFY personalConfigPathChanged)
+    Q_PROPERTY(QString configFeedback READ configFeedback NOTIFY configFeedbackChanged)
     Q_PROPERTY(QString actionFeedback READ actionFeedback NOTIFY actionFeedbackChanged)
     Q_PROPERTY(QString diagnosticText READ diagnosticText NOTIFY diagnosticChanged)
     Q_PROPERTY(QString healthText READ healthText NOTIFY basicStateChanged)
@@ -61,6 +66,11 @@ public:
     QString sourceText() const;
     QString seatText() const;
     bool infantrySeat() const;
+    int configuredRobotId() const { return session_.robotId(); }
+    QVariantList receiverChoices() const;
+    QString personalConfigPath() const { return personalConfigPath_; }
+    QString configFeedback() const { return configFeedback_; }
+    void setPersonalConfigEditor(QString path, std::function<QString(int)> save);
     QString actionFeedback() const;
     QString diagnosticText() const;
     QString healthText() const;
@@ -81,6 +91,7 @@ public:
     Q_INVOKABLE void start();
     Q_INVOKABLE void stop();
     Q_INVOKABLE void requestBusinessAction();
+    Q_INVOKABLE void saveInfantryConfig(int robotId);
 
 signals:
     void stateChanged();
@@ -89,12 +100,17 @@ signals:
     void diagnosticChanged();
     void identityChanged();
     void actionFeedbackChanged();
+    void personalConfigPathChanged();
+    void configFeedbackChanged();
 
 private:
     application::ClientSession &session_;
     std::optional<domain::RunMode> mode_;
     QString startupError_;
     QString logPath_;
+    QString personalConfigPath_;
+    std::function<QString(int)> saveConfig_;
+    QString configFeedback_;
 };
 
 } // namespace rm27::presentation

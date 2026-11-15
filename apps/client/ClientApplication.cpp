@@ -46,6 +46,16 @@ void appendError(QString &errors, const QString &message)
     errors += message;
 }
 
+void configureIdentity(application::ClientSession &session, const config::AppConfig &settings)
+{
+    const auto &mqtt = settings.mqtt;
+    const QString source = settings.mode == domain::RunMode::Preview
+        ? QStringLiteral("内置演示心跳（不连接 MQTT）")
+        : QStringLiteral("MQTT %1:%2 · 连接机器人 clientID %3 · 终端 IP 由系统配置")
+              .arg(mqtt.host).arg(mqtt.port).arg(mqtt.robotId);
+    session.configureIdentity(mqtt.robotId, source, settings.seat);
+}
+
 } // namespace
 
 int ClientApplication::run(QGuiApplication &app)
@@ -90,13 +100,7 @@ int ClientApplication::run(QGuiApplication &app)
         source = std::make_unique<transport::UnavailableDataSource>();
     }
     application::ClientSession session(*source);
-    if (result.config) {
-        session.configureIdentity(settings.mqtt.robotId, settings.mode == domain::RunMode::Preview
-            ? QStringLiteral("内置演示心跳（不连接 MQTT）")
-            : QStringLiteral("MQTT %1:%2 · 连接机器人 clientID %3 · 终端 IP 由系统配置")
-                  .arg(settings.mqtt.host).arg(settings.mqtt.port).arg(settings.mqtt.robotId),
-            settings.seat);
-    }
+    if (result.config) configureIdentity(session, settings);
     QObject::connect(&session, &application::ClientSession::stateChanged, &session, [&] {
         if (logOpen && !logger.write(QStringLiteral("info"), QStringLiteral("session.state"),
                                      session.connectionDetail())) {
@@ -110,6 +114,26 @@ int ClientApplication::run(QGuiApplication &app)
     presentation::ClientViewModel viewModel(session,
         result.config ? std::optional<domain::RunMode>(settings.mode) : std::nullopt,
         startupError, logPath);
+    auto *mqttSource = qobject_cast<transport::MqttDataSource *>(source.get());
+    if (mqttSource && config::isEditableConfigPath(configPath)) {
+        viewModel.setPersonalConfigEditor(QFileInfo(configPath).absoluteFilePath(),
+            [&, mqttSource, revision = result.revision](int robotId) mutable -> QString {
+                const auto saved = config::saveInfantryConfig(configPath, robotId, revision);
+                if (!saved.config) {
+                    if (logOpen && !logger.write(QStringLiteral("warning"), QStringLiteral("config.save_failed"),
+                                                  saved.error)) qWarning().noquote() << logger.errorString();
+                    return saved.error;
+                }
+                revision = saved.revision;
+                mqttSource->setRobotIdWhileStopped(robotId);
+                configureIdentity(session, *saved.config);
+                if (logOpen && !logger.write(QStringLiteral("info"), QStringLiteral("config.saved"),
+                        QStringLiteral("步兵只读 · MQTT clientID %1").arg(robotId))) {
+                    qWarning().noquote() << logger.errorString();
+                }
+                return {};
+            });
+    }
 
     qmlRegisterUncreatableType<presentation::ClientViewModel>(
         "RM27.Client", 1, 0, "ClientViewModel", QStringLiteral("由应用组合根创建"));

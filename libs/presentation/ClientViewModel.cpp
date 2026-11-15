@@ -152,6 +152,40 @@ bool ClientViewModel::infantrySeat() const
     return mode_.has_value() && !preview() && session_.seat() == domain::OperatorSeat::Infantry;
 }
 
+QVariantList ClientViewModel::receiverChoices() const
+{
+    QVariantList choices;
+    for (const int id : domain::mqttRobotIds) {
+        const auto identity = domain::identifyRobot(id).value();
+        const QString team = identity.team == domain::Team::Red ? QStringLiteral("红方") : QStringLiteral("蓝方");
+        const QString label = QStringLiteral("%1 · ID %2 · %3").arg(team).arg(id).arg(roleName(identity.role));
+        choices.append(QVariantMap{{"id", id}, {"label", label}});
+    }
+    return choices;
+}
+
+void ClientViewModel::setPersonalConfigEditor(QString path, std::function<QString(int)> save)
+{
+    personalConfigPath_ = std::move(path);
+    saveConfig_ = std::move(save);
+    emit personalConfigPathChanged();
+}
+
+void ClientViewModel::saveInfantryConfig(int robotId)
+{
+    if (active()) {
+        configFeedback_ = QStringLiteral("请先停止数据源，再保存接收配置。");
+    } else if (!saveConfig_) {
+        configFeedback_ = QStringLiteral("请通过 --config 打开个人接收配置。");
+    } else {
+        const auto error = saveConfig_(robotId);
+        configFeedback_ = error.isEmpty()
+            ? QStringLiteral("已保存步兵只读配置。下次连接使用 clientID %1。").arg(robotId)
+            : QStringLiteral("保存失败，仍使用 clientID %1。\n%2").arg(configuredRobotId()).arg(error);
+    }
+    emit configFeedbackChanged();
+}
+
 QString ClientViewModel::actionFeedback() const { return session_.actionFeedback(); }
 QString ClientViewModel::diagnosticText() const { return session_.diagnostic(); }
 
