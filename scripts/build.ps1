@@ -5,7 +5,8 @@ param(
     [string]$Configuration = 'Debug',
 
     [ValidateRange(1, 256)]
-    [int]$Jobs = [Math]::Min(8, [Environment]::ProcessorCount)
+    [int]$Jobs = [Math]::Min(8, [Environment]::ProcessorCount),
+    [switch]$HevcProbe
 )
 
 $ErrorActionPreference = 'Stop'
@@ -41,11 +42,17 @@ try {
         }
     }
     $cmake = Join-Path $preset[0].environment.RM27_CMAKE_ROOT 'bin/cmake.exe'
-    $executable = [IO.Path]::GetFullPath((Join-Path $projectRoot "build/$presetName/bin/RM27_Client.exe"))
-    $runningClient = Get-Process -Name RM27_Client -ErrorAction SilentlyContinue |
+    $program = 'RM27_Client'
+    $targetArguments = @()
+    if ($HevcProbe) {
+        $program = 'RM27_HevcDecodeProbe'
+        $targetArguments = @('--target', $program)
+    }
+    $executable = [IO.Path]::GetFullPath((Join-Path $projectRoot "build/$presetName/bin/$program.exe"))
+    $runningProgram = Get-Process -Name $program -ErrorAction SilentlyContinue |
         Where-Object { $_.Path -eq $executable }
-    if ($runningClient) {
-        throw "Close the running $presetName client before building; Windows locks its executable."
+    if ($runningProgram) {
+        throw "Close the running $presetName $program before building; Windows locks its executable."
     }
 
     Push-Location -LiteralPath $projectRoot
@@ -56,7 +63,7 @@ try {
             throw "CMake configure failed (exit $LASTEXITCODE)."
         }
         Write-Host "Building $presetName ..."
-        & $cmake --build --preset $presetName --parallel $Jobs
+        & $cmake --build --preset $presetName --parallel $Jobs @targetArguments
         if ($LASTEXITCODE -ne 0) {
             throw "CMake build failed (exit $LASTEXITCODE)."
         }
