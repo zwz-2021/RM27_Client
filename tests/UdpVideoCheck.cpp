@@ -13,6 +13,8 @@ private slots:
     void wireSamples();
     void exclusiveBindAndRestart();
     void burst();
+    void assembleSimulationBytes();
+    void assemblySessionBoundary();
 };
 
 void UdpVideoCheck::wireSamples()
@@ -109,6 +111,83 @@ void UdpVideoCheck::burst()
     QTRY_COMPARE(receiver.status().validPackets, 96ULL);
     QTRY_VERIFY(!changes.isEmpty());
     QVERIFY(changes.count() < 96);
+}
+
+void UdpVideoCheck::assembleSimulationBytes()
+{
+    UdpVideoReceiver receiver;
+    QVERIFY(receiver.start(QStringLiteral("127.0.0.1"), 0, true));
+    QSignalSpy frames(&receiver, &UdpVideoReceiver::frameAssembled);
+    const auto &status = receiver.status();
+    QUdpSocket first;
+    QUdpSocket second;
+    const auto send = [&](QUdpSocket &socket, const char *hex) {
+        const auto bytes = QByteArray::fromHex(hex);
+        QCOMPARE(socket.writeDatagram(bytes, QHostAddress::LocalHost, status.bindPort), bytes.size());
+    };
+
+    // Two independent senders reuse a frame ID. Literal payloads include a zero
+    // and a high bit, so a string conversion or a mix of sources is detectable.
+    send(first,  "ffff 0001 00000004 00ff");
+    send(first,  "ffff 0001 00000004 00ff");
+    send(second, "ffff 0000 00000002 11");
+    send(first,  "ffff 0000 00000004 abcd");
+    QTRY_COMPARE(frames.count(), 1);
+    QCOMPARE(frames.at(0).at(0).toUInt(), 65535U);
+    QCOMPARE(frames.at(0).at(1).toByteArray(), QByteArray::fromHex("abcd00ff"));
+    send(second, "ffff 0001 00000002 22");
+    QTRY_COMPARE(frames.count(), 2);
+    QCOMPARE(frames.at(1).at(0).toUInt(), 65535U);
+    QCOMPARE(frames.at(1).at(1).toByteArray(), QByteArray::fromHex("1122"));
+    send(first,  "0000 0000 00000001 7e");
+    QTRY_COMPARE(frames.count(), 3);
+    QCOMPARE(frames.at(2).at(0).toUInt(), 0U);
+    QCOMPARE(frames.at(2).at(1).toByteArray(), QByteArray::fromHex("7e"));
+    QCOMPARE(status.assembly.completedFrames, 3ULL);
+    QCOMPARE(status.assembly.duplicateFragments, 1ULL);
+
+    send(first, "000a 0000 00000002 31");
+    send(first, "000a 0001 00000001 3233"); // invalid at the header stage, poisons the pending frame
+    send(first, "000a 0001 00000002 32");
+    QTRY_COMPARE(status.inconsistentFramePackets, 1ULL);
+    QCOMPARE(status.assembly.conflictFrames, 1ULL);
+    send(first, "000b 0000 00000002 41");
+    send(first, "000b 0001 00000005"); // intact but contradictory header, empty fragment
+    send(first, "000b 0001 00000002 42");
+    QTRY_COMPARE(status.assembly.ignoredLateFragments, 2ULL);
+    QCOMPARE(status.emptyPayloadPackets, 1ULL);
+    QCOMPARE(status.assembly.conflictFrames, 2ULL);
+    QCOMPARE(status.assembly.pendingFrames, 0);
+    QCOMPARE(frames.size(), 3);
+}
+
+void UdpVideoCheck::assemblySessionBoundary()
+{
+    UdpVideoReceiver receiver;
+    QUdpSocket sender;
+    QSignalSpy frames(&receiver, &UdpVideoReceiver::frameAssembled);
+    const auto &status = receiver.status();
+    const QString address = QStringLiteral("127.0.0.1");
+    const auto send = [&](const char *hex) {
+        const auto bytes = QByteArray::fromHex(hex);
+        QCOMPARE(sender.writeDatagram(bytes, QHostAddress::LocalHost, status.bindPort), bytes.size());
+    };
+
+    QVERIFY(receiver.start(address, 0)); // header-only reception
+    const quint16 port = status.bindPort;
+    send("0000 0000 00000001 01");
+    QTRY_COMPARE(status.validPackets, 1ULL);
+    QCOMPARE(frames.size(), 0);
+    QVERIFY(receiver.start(address, port, true));
+    send("0010 0000 00000002 aa");
+    QTRY_COMPARE(status.assembly.pendingFrames, 1);
+    receiver.stop();
+    QCOMPARE(status.assembly.pendingFrames, 0);
+    QVERIFY(receiver.start(address, port, true));
+    send("0010 0001 00000002 bb");
+    QTRY_COMPARE(status.assembly.timeoutFrames, 1ULL); // no further incoming packets
+    QCOMPARE(status.assembly.bufferedBytes, 0);
+    QCOMPARE(frames.size(), 0);
 }
 
 QTEST_GUILESS_MAIN(UdpVideoCheck)

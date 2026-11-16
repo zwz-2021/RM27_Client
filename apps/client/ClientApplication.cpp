@@ -132,11 +132,18 @@ int ClientApplication::run(QGuiApplication &app)
         if (session.active()) {
             if (session.seat() != domain::OperatorSeat::Infantry || settings.mode == domain::RunMode::Preview
                 || status.state != UdpVideoState::Stopped) return;
-            const bool bound = udp.start(settings.video.bindAddress, static_cast<quint16>(settings.video.port));
+            const bool bound = udp.start(settings.video.bindAddress, static_cast<quint16>(settings.video.port),
+                                         settings.mode == domain::RunMode::Simulation);
             logVideo(bound ? QStringLiteral("info") : QStringLiteral("warning"),
                      bound ? QStringLiteral("video.bound") : QStringLiteral("video.bind_failed"),
                      viewModel.udpBindingText());
         } else if (status.state != UdpVideoState::Stopped) {
+            if (settings.mode == domain::RunMode::Simulation && status.state != UdpVideoState::BindFailed) {
+                // Capture the final counters even when stopping between batched UI notifications.
+                viewModel.setUdpStatus(status);
+                logVideo(QStringLiteral("info"), QStringLiteral("video.assembly_summary"),
+                         viewModel.udpAssemblyText());
+            }
             logVideo(QStringLiteral("info"), QStringLiteral("video.stopped"),
                      QStringLiteral("有效包 %1 · 丢弃 %2").arg(status.validPackets).arg(status.droppedPackets()));
             udp.stop();

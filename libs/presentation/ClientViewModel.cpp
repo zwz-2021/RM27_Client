@@ -146,6 +146,30 @@ QString ClientViewModel::udpHeaderText() const
         .arg(header.frameId).arg(header.fragmentIndex).arg(header.frameBytes);
 }
 
+QString ClientViewModel::udpAssemblyText() const
+{
+    if (mode_ != domain::RunMode::Simulation)
+        return QStringLiteral("官方源分片起点待核验，当前仅统计收包。");
+    const auto &stats = udpStatus_.assembly;
+    return QStringLiteral("本机模拟组帧 · 完整帧 %1 · 丢帧 %2（超时 %3 · 冲突 %4 · 超出预算 %5）"
+                          " · 重复分片 %6 · 迟到分片 %7\n在途 %8 帧 · 缓存 %9 字节（%10 片）")
+        .arg(stats.completedFrames).arg(stats.droppedFrames()).arg(stats.timeoutFrames)
+        .arg(stats.conflictFrames).arg(stats.limitFrames).arg(stats.duplicateFragments)
+        .arg(stats.ignoredLateFragments).arg(stats.pendingFrames).arg(stats.bufferedBytes)
+        .arg(stats.bufferedFragments);
+}
+
+QString ClientViewModel::udpLastFrameText() const
+{
+    if (mode_ != domain::RunMode::Simulation)
+        return {};
+    if (!udpStatus_.lastFrame)
+        return QStringLiteral("尚未收到完整帧");
+    const auto &frame = *udpStatus_.lastFrame;
+    return QStringLiteral("最近完整帧 · 帧号 %1 · 长度 %2 字节 · 来源 %3:%4")
+        .arg(frame.frameId).arg(frame.bytes).arg(frame.sourceAddress).arg(frame.sourcePort);
+}
+
 QString ClientViewModel::modeText() const
 {
     if (!mode_) return QStringLiteral("未确定（配置错误）");

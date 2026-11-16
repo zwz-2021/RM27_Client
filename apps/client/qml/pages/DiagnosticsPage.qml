@@ -40,6 +40,19 @@ ScrollView {
           text: root.viewModel.udpHeaderText
           wrapMode: Text.WrapAnywhere
         }
+        Label {
+          objectName: "udpAssemblyLabel"
+          Layout.fillWidth: true
+          text: root.viewModel.udpAssemblyText
+          wrapMode: Text.Wrap
+        }
+        Label {
+          objectName: "udpLastFrameLabel"
+          Layout.fillWidth: true
+          text: root.viewModel.udpLastFrameText
+          visible: text.length > 0
+          wrapMode: Text.WrapAnywhere
+        }
       }
     }
     InfoCard {

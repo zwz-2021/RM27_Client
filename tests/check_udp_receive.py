@@ -1,4 +1,4 @@
-"""Exercise AT-052 through the Windows launcher, real Qt window and loopback sockets."""
+"""Exercise AT-052/053 through the Windows launcher, real Qt window and loopback sockets."""
 from __future__ import annotations
 
 import argparse
@@ -80,6 +80,44 @@ def exclusive_udp(port):
         raise
 
 
+async def check_assembly(window, target):
+    # Independent literal samples, deliberately using unequal fragment lengths.
+    with exclusive_udp(0) as sender:
+        source = rf"来源 127\.0\.0\.1:{sender.getsockname()[1]}\b"
+        fragments = [
+            bytes.fromhex("ff ff 00 00 00 00 00 06 41"),
+            bytes.fromhex("ff ff 00 01 00 00 00 06 42 43"),
+            bytes.fromhex("ff ff 00 02 00 00 00 06 44 45 46"),
+        ]
+        for index in (2, 1, 1, 0):
+            sender.sendto(fragments[index], target)
+        await window.observe("out-of-order and duplicate fragments complete one frame",
+                             udpAssemblyLabel=r"完整帧 1\b.*重复分片 1\b",
+                             udpLastFrameLabel=rf"帧号 65535 · 长度 6 字节 · {source}")
+
+        sender.sendto(bytes.fromhex("00 00 00 00 00 00 00 01 47"), target)
+        last = rf"帧号 0 · 长度 1 字节 · {source}"
+        await window.observe("same sender wraps to complete frame zero", udpAssemblyLabel=r"完整帧 2\b",
+                             udpLastFrameLabel=last)
+
+        sender.sendto(bytes.fromhex("00 01 00 01 00 00 00 03 48"), target)
+        await window.observe("incomplete frame expires without any further UDP traffic",
+                             udpAssemblyLabel=r"(?s)完整帧 2\b.*丢帧 1\b.*超时 1\b.*在途 0 帧.*缓存 0 字节",
+                             udpLastFrameLabel=last)
+
+        for packet in (
+            "00 02 00 00 00 00 00 02 49",  # Frame 2 announces 2 bytes.
+            "00 02 00 01 00 00 00 03 4a",  # Same frame now announces 3.
+            "00 02 00 01 00 00 00 02 4a",  # Old tail must not resurrect it.
+            "00 03 00 00 ff ff ff ff 4b",  # Untrusted length must not allocate.
+        ):
+            sender.sendto(bytes.fromhex(packet), target)
+        await window.observe("conflict, late tail and over-budget frame discarded",
+                             udpAssemblyLabel=r"(?s)完整帧 2\b.*丢帧 3\b.*超时 1\b.*冲突 1\b.*超出预算 1\b"
+                                              r".*重复分片 1\b.*迟到分片 1\b.*在途 0 帧.*缓存 0 字节",
+                             udpLastFrameLabel=last, udpCountersLabel=r"^有效包 10 · 丢弃 0\b")
+
+
 async def verify(configuration, evidence):
     clip = evidence / "four-frames.mp4"
     subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=blue:size=1920x1080:rate=60",
@@ -122,7 +160,8 @@ async def verify(configuration, evidence):
             await window.observe("MQTT ready after manual restart", connectionValue="^五类订阅就绪$")
             await window.action("diagnosticsTab")
             await window.observe("UDP bound with fresh counters", udpBindingLabel=rf"已绑定 127\.0\.0\.1:{port}\b",
-                                 udpCountersLabel=r"^有效包 0 · 丢弃 0\b", udpHeaderLabel="尚未收到有效包")
+                                 udpCountersLabel=r"^有效包 0 · 丢弃 0\b", udpHeaderLabel="尚未收到有效包",
+                                 udpAssemblyLabel=r"完整帧 0\b", udpLastFrameLabel="尚未收到完整帧")
 
             with exclusive_udp(0) as sender:
                 source_port = sender.getsockname()[1]
@@ -146,11 +185,15 @@ async def verify(configuration, evidence):
                 sender.sendto(bytes.fromhex("00 00 00 00 00 00 00 01 aa"), target)
                 await window.action("diagnosticsTab")
                 await window.observe("frame 65535 to 0 while MQTT offline", udpCountersLabel=r"^有效包 2 · 丢弃 11\b",
-                                     udpHeaderLabel=r"整包 9 字节 · 帧号 0 · 分片号 0 · 整帧 1 字节")
+                                     udpHeaderLabel=r"整包 9 字节 · 帧号 0 · 分片号 0 · 整帧 1 字节",
+                                     udpAssemblyLabel=r"完整帧 1\b",
+                                     udpLastFrameLabel=rf"帧号 0 · 长度 1 字节 · 来源 127\.0\.0\.1:{source_port}\b")
 
-            await asyncio.to_thread(send_video_as_hevc_udp, str(clip), *target, loop=False)
+                # Keep this source bound while the simulator opens its own UDP socket.
+                await asyncio.to_thread(send_video_as_hevc_udp, str(clip), *target, loop=False)
             simulator = await window.observe("four HEVC frames from the simulator sender", udpHeaderLabel=r"帧号 3 · 分片号",
-                                             udpCountersLabel=r"^有效包 (\d+) · 丢弃 11\b")
+                                             udpCountersLabel=r"^有效包 (\d+) · 丢弃 11\b",
+                                             udpAssemblyLabel=r"完整帧 5\b", udpLastFrameLabel=r"帧号 3 · 长度 [1-9]\d* 字节")
             simulator_packets = int(re.search(r"有效包 (\d+)", simulator["udpCountersLabel"])[1]) - 2
             require(simulator_packets >= 4, "Missing simulator packets")
             await window.action("overviewTab")
@@ -159,12 +202,16 @@ async def verify(configuration, evidence):
             with exclusive_udp(port):
                 await window.action("diagnosticsTab")
                 await window.observe("UDP released and last header cleared", udpBindingLabel="已停止",
-                                     udpHeaderLabel="尚未收到有效包", udpCountersLabel=r"^有效包 0 · 丢弃 0\b")
+                                     udpHeaderLabel="尚未收到有效包", udpCountersLabel=r"^有效包 0 · 丢弃 0\b",
+                                     udpAssemblyLabel=r"(?s)完整帧 0\b.*超时 0\b.*在途 0 帧.*缓存 0 字节",
+                                     udpLastFrameLabel="尚未收到完整帧")
             await window.action("overviewTab")
             await window.action("startButton")
             await window.action("diagnosticsTab")
             await window.observe("new session without old data", udpBindingLabel=rf"已绑定 127\.0\.0\.1:{port}\b",
-                                 udpCountersLabel=r"^有效包 0 · 丢弃 0\b", udpHeaderLabel="尚未收到有效包")
+                                 udpCountersLabel=r"^有效包 0 · 丢弃 0\b", udpHeaderLabel="尚未收到有效包",
+                                 udpAssemblyLabel=r"完整帧 0\b", udpLastFrameLabel="尚未收到完整帧")
+            await check_assembly(window, target)
 
     with exclusive_udp(port), socket.socket() as probe:
         probe.settimeout(1)
@@ -175,15 +222,22 @@ async def verify(configuration, evidence):
     require(not any(row["kind"] == "client-publish" for row in packets), "Unexpected client business publish")
     log_file, = evidence.glob("client-*.jsonl")
     records = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines()]
-    events = [row["event"] for row in records if row["event"].startswith("video.")]
+    events = [row["event"] for row in records
+              if row["event"].startswith("video.") and row["event"] != "video.assembly_summary"]
     require(events == ["video.bind_failed", "video.stopped", "video.bound", "video.stopped",
                        "video.bound", "video.stopped"] and records[-1]["event"] == "client.stop",
             f"Unexpected client lifecycle log: {events}")
     totals = [row["detail"] for row in records if row["event"] == "video.stopped"]
-    require(totals == ["有效包 0 · 丢弃 0", f"有效包 {simulator_packets + 2} · 丢弃 11", "有效包 0 · 丢弃 0"],
+    require(totals == ["有效包 0 · 丢弃 0", f"有效包 {simulator_packets + 2} · 丢弃 11", "有效包 10 · 丢弃 0"],
             f"Client log disagrees with window counters: {totals}")
+    assembly = [row["detail"] for row in records if row["event"] == "video.assembly_summary"]
+    require(len(assembly) == 2 and re.search(r"完整帧 5\b", assembly[0])
+            and re.search(r"完整帧 2\b.*超时 1\b.*冲突 1\b.*超出预算 1\b", assembly[1]),
+            f"Client log disagrees with frame results: {assembly}")
     return {"udpPortReleased": port, "brokerPortReleased": mqtt_port, "simulatorPackets": simulator_packets,
-            "mqttSubscriptions": len(topics), "clientBusinessPublishes": 0, "clientLog": log_file.name}
+            "simulatorCompleteFrames": 4, "fixtureCompleteFrames": 2, "fixtureTimeouts": 1,
+            "fixtureConflicts": 1, "fixtureBudgetDrops": 1, "mqttSubscriptions": len(topics),
+            "clientBusinessPublishes": 0, "clientLog": log_file.name}
 
 
 if __name__ == "__main__":
