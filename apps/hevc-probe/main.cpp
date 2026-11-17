@@ -102,7 +102,8 @@ bool decodeFile(const QString &file, int stopAfter, QFile &output)
     if (!input.isFile()) {
         reader.error = QStringLiteral("找不到本地视频文件：%1").arg(file);
     } else {
-        decoder.start("ffmpeg", {"-hide_banner", "-nostdin", "-loglevel", "error", "-xerror",
+        // Keep decoding after a damaged picture so a later independent picture can be read.
+        decoder.start("ffmpeg", {"-hide_banner", "-nostdin", "-loglevel", "error",
             "-protocol_whitelist", "file", "-hwaccel", "none", "-c:v", "hevc", "-threads", "2",
             "-max_pixels", QString::number(MaxCodedPixels),
             "-err_detect", "explode", "-f", "hevc", "-i", input.absoluteFilePath(), "-map", "0:v:0",
@@ -123,8 +124,7 @@ bool decodeFile(const QString &file, int stopAfter, QFile &output)
             drainFrames();
             drainDiagnostics();
             if (!reader.stopped && reader.error.isEmpty()) {
-                if (decoder.exitStatus() != QProcess::NormalExit || decoder.exitCode() != 0
-                    || !diagnostics.trimmed().isEmpty())
+                if (decoder.exitStatus() != QProcess::NormalExit || decoder.exitCode() != 0)
                     reader.error = QStringLiteral("FFmpeg 解码失败（退出码 %1）").arg(decoder.exitCode());
                 else if (decoder.bytesAvailable())
                     reader.error = QStringLiteral("FFmpeg 帧校验报告在行内中断");
@@ -133,16 +133,20 @@ bool decodeFile(const QString &file, int stopAfter, QFile &output)
             }
         }
     }
-    if (!reader.error.isEmpty() && !diagnostics.trimmed().isEmpty())
-        reader.error += QStringLiteral("：") + QString::fromUtf8(diagnostics.trimmed());
+    const QString diagnostic = QString::fromUtf8(diagnostics.trimmed());
+    if (!reader.error.isEmpty() && !diagnostic.isEmpty())
+        reader.error += QStringLiteral("：") + diagnostic;
     QString status = QStringLiteral("completed");
     if (!reader.error.isEmpty())
         status = QStringLiteral("error");
     else if (reader.stopped)
         status = QStringLiteral("stopped");
+    else if (!diagnostic.isEmpty())
+        status = QStringLiteral("completed_with_errors");
     writeEvent(output, {{"event", "summary"}, {"file", file}, {"status", status},
-                        {"frames", reader.frames}, {"error", reader.error}});
-    return reader.error.isEmpty();
+                        {"frames", reader.frames}, {"error", reader.error}, {"diagnostic", diagnostic}});
+    // The probe checks integrity. Even a readable file with a damaged slice fails that check.
+    return reader.error.isEmpty() && diagnostic.isEmpty();
 }
 
 } // namespace
