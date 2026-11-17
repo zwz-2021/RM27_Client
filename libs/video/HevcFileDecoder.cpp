@@ -1,4 +1,5 @@
 #include "video/HevcFileDecoder.h"
+#include "video/HevcDecodeProcess_p.h"
 
 #include <QCoreApplication>
 #include <QDeadlineTimer>
@@ -25,8 +26,9 @@ constexpr int StopPollMs = 50;
 class PixelPipe {
 public:
     PixelPipe(QLocalSocket &socket, const std::atomic_bool &stopRequested,
-              QDeadlineTimer deadline, QString &error)
-        : socket_(socket), stopRequested_(stopRequested), deadline_(deadline), error_(error) {}
+              QDeadlineTimer deadline, QString &error, int pollMs, const std::function<void()> &pump)
+        : socket_(socket), stopRequested_(stopRequested), deadline_(deadline), error_(error),
+          pollMs_(pollMs), pump_(pump) {}
 
     QByteArray readLine()
     {
@@ -84,7 +86,9 @@ private:
                 return true;
             if (socket_.state() == QLocalSocket::UnconnectedState)
                 break;
-            if (!socket_.waitForReadyRead(StopPollMs))
+            if (pump_)
+                pump_();
+            if (!socket_.waitForReadyRead(pollMs_))
                 QCoreApplication::processEvents(); // Drain stderr even if the input yields no frame.
         }
         return false;
@@ -94,6 +98,8 @@ private:
     const std::atomic_bool &stopRequested_;
     QDeadlineTimer deadline_;
     QString &error_;
+    int pollMs_;
+    const std::function<void()> &pump_;
 };
 
 bool parseFormat(const QByteArray &header, int &width, int &height)
@@ -115,9 +121,10 @@ bool parseFormat(const QByteArray &header, int &width, int &height)
 }
 
 void deliverFrames(QLocalSocket &socket, const std::atomic_bool &stopRequested, QDeadlineTimer deadline,
-                   const HevcFileDecoder::FrameHandler &onFrame, HevcDecodeResult &result)
+                   const HevcFileDecoder::FrameHandler &onFrame, HevcDecodeResult &result,
+                   int pollMs, const std::function<void()> &pump)
 {
-    PixelPipe pipe(socket, stopRequested, deadline, result.error);
+    PixelPipe pipe(socket, stopRequested, deadline, result.error, pollMs, pump);
     const auto header = pipe.readLine();
     if (header.isEmpty())
         return;
@@ -142,15 +149,21 @@ void deliverFrames(QLocalSocket &socket, const std::atomic_bool &stopRequested, 
             break;
         onFrame({++result.frames, width, height, std::move(pixels)});
         QCoreApplication::processEvents(); // Consume decoder diagnostics during continuous output.
+        if (pump)
+            pump();
     }
 }
 
-HevcDecodeResult decodeFile(const QString &file, const std::atomic_bool &stopRequested,
-                            const HevcFileDecoder::FrameHandler &onFrame)
+} // namespace
+
+HevcDecodeResult detail::decodeHevc(const QString &file, const std::atomic_bool &stopRequested,
+                                    const HevcFileDecoder::FrameHandler &onFrame,
+                                    const std::function<void(QProcess &)> &pumpInput,
+                                    const std::function<void(const QString &)> &onDiagnostic)
 {
     HevcDecodeResult result;
     const QFileInfo input(file);
-    if (!input.isFile()) {
+    if (!pumpInput && !input.isFile()) {
         result.error = QStringLiteral("找不到本地视频文件：%1").arg(file);
         return result;
     }
@@ -176,29 +189,47 @@ HevcDecodeResult decodeFile(const QString &file, const std::atomic_bool &stopReq
     QByteArray diagnostics;
     QProcess decoder;
     const auto drainDiagnostics = [&] {
-        diagnostics = (diagnostics + decoder.readAllStandardError().right(4096)).right(4096);
+        const auto bytes = decoder.readAllStandardError();
+        if (!bytes.isEmpty()) {
+            diagnostics = (diagnostics + bytes.right(4096)).right(4096);
+            if (onDiagnostic)
+                onDiagnostic(QString::fromUtf8(diagnostics.trimmed()));
+        }
     };
     QObject::connect(&decoder, &QProcess::readyReadStandardError, drainDiagnostics);
     decoder.setStandardOutputFile(QProcess::nullDevice());
-    decoder.start("ffmpeg", {"-hide_banner", "-nostdin", "-y", "-loglevel", "error",
-        "-protocol_whitelist", "file", "-hwaccel", "none", "-c:v", "hevc", "-threads", "2",
-        "-max_pixels", QString::number(MaxCodedPixels),
-        "-err_detect", "explode", "-f", "hevc", "-i", input.absoluteFilePath(), "-map", "0:v:0",
+    QStringList arguments{"-hide_banner", "-nostdin", "-y", "-loglevel", "error",
+        "-protocol_whitelist", pumpInput ? "pipe" : "file", "-hwaccel", "none", "-c:v", "hevc",
+        "-threads", "2", "-max_pixels", QString::number(MaxCodedPixels), "-err_detect", "explode"};
+    if (pumpInput)
+        arguments << "-probesize" << "32" << "-analyzeduration" << "1";
+    arguments << QStringList{"-f", "hevc", "-i", pumpInput ? QStringLiteral("pipe:0") : input.absoluteFilePath(),
+        "-map", "0:v:0",
         "-fps_mode", "passthrough", "-pix_fmt", "yuv420p", "-f", "yuv4mpegpipe",
-        "-flush_packets", "1", destination}, QIODevice::ReadOnly);
-    const QDeadlineTimer deadline(ShortClipTimeoutMs);
+        "-flush_packets", "1", destination};
+    decoder.start("ffmpeg", arguments, pumpInput ? QIODevice::ReadWrite : QIODevice::ReadOnly);
+    const QDeadlineTimer deadline = pumpInput ? QDeadlineTimer(QDeadlineTimer::Forever)
+                                               : QDeadlineTimer(ShortClipTimeoutMs);
+    const int pollMs = pumpInput ? 5 : StopPollMs;
+    std::function<void()> pump;
+    if (pumpInput)
+        pump = [&] { pumpInput(decoder); };
     if (!decoder.waitForStarted()) {
         result.error = QStringLiteral("无法启动 FFmpeg，请检查 PATH：%1").arg(decoder.errorString());
     } else {
         while (!stopRequested && !deadline.hasExpired() && !server.hasPendingConnections()) {
-            server.waitForNewConnection(StopPollMs);
+            if (pump) {
+                QCoreApplication::processEvents();
+                pump();
+            }
+            server.waitForNewConnection(pollMs);
             if (decoder.state() == QProcess::NotRunning || decoder.waitForFinished(0))
                 break;
         }
         if (auto *socket = server.nextPendingConnection()) {
             socket->setReadBufferSize(256 * 1024);
             try {
-                deliverFrames(*socket, stopRequested, deadline, onFrame, result);
+                deliverFrames(*socket, stopRequested, deadline, onFrame, result, pollMs, pump);
             } catch (const std::exception &e) {
                 result.error = QStringLiteral("像素帧交付失败：%1").arg(QString::fromUtf8(e.what()));
             } catch (...) {
@@ -206,8 +237,11 @@ HevcDecodeResult decodeFile(const QString &file, const std::atomic_bool &stopReq
             }
         }
         while (!stopRequested && result.error.isEmpty() && !deadline.hasExpired()
-               && decoder.state() != QProcess::NotRunning)
-            decoder.waitForFinished(StopPollMs);
+               && decoder.state() != QProcess::NotRunning) {
+            if (pump)
+                pump();
+            decoder.waitForFinished(pollMs);
+        }
         if (!stopRequested && deadline.hasExpired() && result.error.isEmpty())
             result.error = QStringLiteral("本地短片解码超时");
     }
@@ -227,8 +261,6 @@ HevcDecodeResult decodeFile(const QString &file, const std::atomic_bool &stopReq
     return result;
 }
 
-} // namespace
-
 HevcFileDecoder::~HevcFileDecoder()
 {
     requestStop();
@@ -242,7 +274,7 @@ bool HevcFileDecoder::start(const QString &file, FrameHandler onFrame)
     stopRequested_ = false;
     result_ = {};
     worker_.reset(QThread::create([this, file, onFrame = std::move(onFrame)] {
-        result_ = decodeFile(file, stopRequested_, onFrame);
+        result_ = detail::decodeHevc(file, stopRequested_, onFrame);
     }));
     worker_->start();
     return true;

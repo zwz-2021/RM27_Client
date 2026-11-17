@@ -53,6 +53,13 @@ ScrollView {
           visible: text.length > 0
           wrapMode: Text.WrapAnywhere
         }
+        Label {
+          objectName: "videoDecodeLabel"
+          Layout.fillWidth: true
+          text: root.viewModel.videoDecodeText
+          visible: text.length > 0
+          wrapMode: Text.WrapAnywhere
+        }
       }
     }
     InfoCard {

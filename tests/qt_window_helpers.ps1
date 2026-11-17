@@ -29,12 +29,14 @@ function Invoke-Control([string]$Name) {
 }
 
 function Invoke-ProductWindow([string]$ConfigFile, [string]$WindowTitle, [string]$Configuration,
-                              [string]$LogDirectory, [scriptblock]$Exercise) {
+                              [string]$LogDirectory, [scriptblock]$Exercise, [switch]$TraceSimulatedVideo) {
     $entry = Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts/run.ps1'
-    $launcher = Start-Process powershell.exe -PassThru -WindowStyle Hidden -ArgumentList @(
+    $arguments = @(
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $entry + '"'), '-SkipBuild',
         '-Configuration', $Configuration, '-ConfigFile', ('"' + $ConfigFile + '"'),
         '-LogDirectory', ('"' + $LogDirectory + '"'))
+    if ($TraceSimulatedVideo) { $arguments += '-TraceSimulatedVideo' }
+    $launcher = Start-Process powershell.exe -PassThru -WindowStyle Hidden -ArgumentList $arguments
     $client = $null
     try {
         $timer = [Diagnostics.Stopwatch]::StartNew()

@@ -135,10 +135,13 @@ void UdpVideoCheck::assembleSimulationBytes()
     QTRY_COMPARE(frames.count(), 1);
     QCOMPARE(frames.at(0).at(0).toUInt(), 65535U);
     QCOMPARE(frames.at(0).at(1).toByteArray(), QByteArray::fromHex("abcd00ff"));
+    QCOMPARE(frames.at(0).at(2).toString(), QStringLiteral("127.0.0.1"));
+    QCOMPARE(frames.at(0).at(3).toUInt(), first.localPort());
     send(second, "ffff 0001 00000002 22");
     QTRY_COMPARE(frames.count(), 2);
     QCOMPARE(frames.at(1).at(0).toUInt(), 65535U);
     QCOMPARE(frames.at(1).at(1).toByteArray(), QByteArray::fromHex("1122"));
+    QCOMPARE(frames.at(1).at(3).toUInt(), second.localPort());
     send(first,  "0000 0000 00000001 7e");
     QTRY_COMPARE(frames.count(), 3);
     QCOMPARE(frames.at(2).at(0).toUInt(), 0U);

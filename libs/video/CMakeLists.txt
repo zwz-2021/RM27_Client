@@ -1,6 +1,9 @@
 add_library(rm27_video STATIC
     HevcFileDecoder.cpp
     HevcFileDecoder.h
+    HevcDecodeProcess_p.h
+    HevcStreamDecoder.cpp
+    HevcStreamDecoder.h
     VideoFrameAssembler.cpp
     VideoFrameAssembler.h
     UdpVideoStatus.h
@@ -22,7 +25,11 @@ if(BUILD_TESTING)
         set_target_properties(RM27_HevcFileDecoderLifecycleCheck PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
         add_test(NAME hevc_file_decoder_lifecycle COMMAND RM27_HevcFileDecoderLifecycleCheck)
         get_filename_component(ffmpeg_dir "${RM27_FFMPEG_EXECUTABLE}" DIRECTORY)
-        set_tests_properties(hevc_file_decoder_lifecycle PROPERTIES
+        add_executable(RM27_HevcStreamDecoderCheck ../../tests/HevcStreamDecoderCheck.cpp)
+        target_link_libraries(RM27_HevcStreamDecoderCheck PRIVATE rm27_video Qt6::Test)
+        set_target_properties(RM27_HevcStreamDecoderCheck PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+        add_test(NAME hevc_stream_decoder COMMAND RM27_HevcStreamDecoderCheck)
+        set_tests_properties(hevc_file_decoder_lifecycle hevc_stream_decoder PROPERTIES
             TIMEOUT 30 ENVIRONMENT "RM27_TEST_FFMPEG_DIR=${ffmpeg_dir}")
     endif()
 endif()

@@ -1,4 +1,5 @@
 #include "ClientApplication.h"
+#include "SimulationVideoDecode.h"
 
 #include "application/ClientSession.h"
 #include "config/AppConfig.h"
@@ -70,6 +71,8 @@ int ClientApplication::run(QGuiApplication &app)
                       QStringLiteral("path"), QStringLiteral(":/RM27/Client/defaults.json")});
     parser.addOption({QStringLiteral("log-dir"), QStringLiteral("Override log directory"),
                       QStringLiteral("path")});
+    parser.addOption({QStringLiteral("trace-simulated-video"),
+                      QStringLiteral("Log pixel hashes for the first 32 decoded frames of each local simulation session")});
     parser.process(app);
 
     const QString configPath = parser.value(QStringLiteral("config"));
@@ -120,6 +123,14 @@ int ClientApplication::run(QGuiApplication &app)
         if (logOpen && !logger.write(level, event, detail)) qWarning().noquote() << logger.errorString();
     };
     using video::UdpVideoState;
+    std::unique_ptr<SimulationVideoDecode> simulationDecode;
+    // The active session checks the seat before binding UDP, including after personal config edits.
+    if (result.config && settings.mode == domain::RunMode::Simulation) {
+        simulationDecode = std::make_unique<SimulationVideoDecode>(udp, parser.isSet(QStringLiteral("trace-simulated-video")));
+        QObject::connect(simulationDecode.get(), &SimulationVideoDecode::statusChanged,
+                         &viewModel, &presentation::ClientViewModel::setVideoDecodeText);
+        QObject::connect(simulationDecode.get(), &SimulationVideoDecode::logRecord, &viewModel, logVideo);
+    }
     QObject::connect(&udp, &transport::UdpVideoReceiver::statusChanged, &viewModel, [&] {
         const auto &status = udp.status();
         viewModel.setUdpStatus(status);

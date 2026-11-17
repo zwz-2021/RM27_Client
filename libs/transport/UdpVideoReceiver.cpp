@@ -149,7 +149,7 @@ void UdpVideoReceiver::drain()
                 status_.assembly = assembler_.stats();
                 if (frame) {
                     status_.lastFrame = video::UdpFrameInfo{header.frameId, frame->size(), address, senderPort};
-                    emit frameAssembled(header.frameId, *frame);
+                    emit frameAssembled(header.frameId, *frame, address, senderPort);
                 }
             }
         }

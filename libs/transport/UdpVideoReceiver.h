@@ -20,7 +20,7 @@ public:
 
 signals:
     void statusChanged();
-    void frameAssembled(quint16 frameId, const QByteArray &bytes);
+    void frameAssembled(quint16 frameId, const QByteArray &bytes, const QString &sourceAddress, quint16 sourcePort);
 
 private:
     void drain();

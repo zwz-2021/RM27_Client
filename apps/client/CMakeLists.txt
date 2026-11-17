@@ -2,6 +2,8 @@ qt_add_executable(RM27_Client WIN32
     main.cpp
     ClientApplication.cpp
     ClientApplication.h
+    SimulationVideoDecode.cpp
+    SimulationVideoDecode.h
     client.qrc
 )
 target_link_libraries(RM27_Client PRIVATE

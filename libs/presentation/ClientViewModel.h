@@ -41,6 +41,7 @@ class ClientViewModel : public QObject {
     Q_PROPERTY(QString udpHeaderText READ udpHeaderText NOTIFY udpChanged)
     Q_PROPERTY(QString udpAssemblyText READ udpAssemblyText NOTIFY udpChanged)
     Q_PROPERTY(QString udpLastFrameText READ udpLastFrameText NOTIFY udpChanged)
+    Q_PROPERTY(QString videoDecodeText READ videoDecodeText NOTIFY videoDecodeChanged)
     Q_PROPERTY(QString healthText READ healthText NOTIFY basicStateChanged)
     Q_PROPERTY(QString dynamicStatusText READ dynamicStatusText NOTIFY basicStateChanged)
     Q_PROPERTY(QString dynamicSummary READ dynamicSummary NOTIFY basicStateChanged)
@@ -85,6 +86,8 @@ public:
     QString udpHeaderText() const;
     QString udpAssemblyText() const;
     QString udpLastFrameText() const;
+    QString videoDecodeText() const { return videoDecodeText_; }
+    void setVideoDecodeText(const QString &text);
     QString healthText() const;
     QString dynamicStatusText() const;
     QString dynamicSummary() const;
@@ -111,6 +114,7 @@ signals:
     void basicStateChanged();
     void diagnosticChanged();
     void udpChanged();
+    void videoDecodeChanged();
     void identityChanged();
     void actionFeedbackChanged();
     void personalConfigPathChanged();
@@ -125,6 +129,7 @@ private:
     std::function<QString(int)> saveConfig_;
     QString configFeedback_;
     video::UdpVideoStatus udpStatus_;
+    QString videoDecodeText_;
 };
 
 } // namespace rm27::presentation

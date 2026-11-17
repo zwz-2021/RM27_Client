@@ -13,6 +13,8 @@ param(
     [string]$ConfigFile,
     [Parameter(Position = 3, ParameterSetName = 'Client')]
     [string]$LogDirectory,
+    [Parameter(ParameterSetName = 'Client')]
+    [switch]$TraceSimulatedVideo,
 
     [Parameter(Mandatory, ParameterSetName = 'Hevc')]
     [string[]]$HevcFile,
@@ -75,6 +77,9 @@ try {
             $LogDirectory = Join-Path $projectRoot $LogDirectory
         }
         $programArguments += @('--log-dir', $LogDirectory)
+    }
+    if ($TraceSimulatedVideo) {
+        $programArguments += '--trace-simulated-video'
     }
 
     if (-not $SkipBuild) {

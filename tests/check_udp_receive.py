@@ -48,12 +48,13 @@ class Window:
 
 
 @asynccontextmanager
-async def open_window(config, title, configuration):
+async def open_window(config, title, configuration, *, trace_video=False):
     with (config.parent / "window-driver.log").open("wb") as errors:
         process = await asyncio.create_subprocess_exec(
             "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
             str(ROOT / "tests" / "check_udp_window.ps1"), "-ConfigFile", str(config),
-            "-WindowTitle", title, "-Configuration", configuration, cwd=ROOT,
+            "-WindowTitle", title, "-Configuration", configuration,
+            *(["-TraceSimulatedVideo"] if trace_video else []), cwd=ROOT,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors,
             creationflags=subprocess.CREATE_NO_WINDOW)
         window = Window(process, config.parent)
@@ -222,8 +223,8 @@ async def verify(configuration, evidence):
     require(not any(row["kind"] == "client-publish" for row in packets), "Unexpected client business publish")
     log_file, = evidence.glob("client-*.jsonl")
     records = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines()]
-    events = [row["event"] for row in records
-              if row["event"].startswith("video.") and row["event"] != "video.assembly_summary"]
+    events = [row["event"] for row in records if row["event"].startswith("video.")
+              and row["event"] not in ("video.assembly_summary", "video.decode_summary")]
     require(events == ["video.bind_failed", "video.stopped", "video.bound", "video.stopped",
                        "video.bound", "video.stopped"] and records[-1]["event"] == "client.stop",
             f"Unexpected client lifecycle log: {events}")
