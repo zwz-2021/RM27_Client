@@ -1,0 +1,741 @@
+# 03 协议消息与功能覆盖矩阵
+
+审计日期：2026-11-02。固定依据：通信协议 V1.0.0（20261029），本文件页码均为PDF阅读器页号，印刷页号=阅读器页号−1。此处是开发契约审计，32条列全不代表已实现。字段级未决项按[09 问题记录](09_Open_Questions.md)处理。本次复核完整第2章及第1章接口范围，附硬件32命令/9组子内容清点，不把桌面不直接接入的接口省略或误承诺实现。
+
+## 2026-11-04 五类接收实现补记
+
+下方总表的“客户端 / 模拟器”列保留 2026-11-02 审计时点，当前实现进度统一见 [13 进度记录](13_Progress_Log.md)。本轮没有改变下面的协议契约：`GameStatus`、`GlobalUnitStatus`、`GlobalLogisticsStatus`、`RobotStaticStatus`、`RobotDynamicStatus` 已接入真实 MQTT、领域状态、展示模型和最小 QML 页面。正常模拟器网页事件经本地 AMQTT 到 Qt 的红 3 / 蓝 103 血量 321、热量小数、uint64 经济等检查通过；实际订阅为五条精确 Topic / QoS 1，不代表全部 23 条下行或 32 条消息已经实现。
+
+本轮还检查订阅拒绝、空数据、坏包、显式零/缺失、保留报文拒绝、身份错配/突发、按 Topic 过期、延迟订阅确认、断线及 100 次启停。过期门槛（Game/Dynamic 1 秒、其余 3 秒）、1 MiB 单包防护及静态身份队列 8 条均为本地工程限制，不能写成官方字段或频率要求。消息到达时间只用于本地时效，不补造发送端时间和跨 Topic 官方事务顺序。
+
+依据复核、P-002 / P-003 网络验证范围、P-004 / P-007 的待确认边界及 P-009 抓包见 [09 本轮补记](09_Open_Questions.md#2026-11-04五类基础消息真实-qt-mqtt-接收补记)；[运行汇总](../../logs/check-mqtt-20261104-215037/summary.json)保留实际结果。官方设备、机器人及全部角色现场接收仍未验证。
+
+## 接口边界与公共要求
+
+2026-11-07席位范围：下方32条仍是官方契约对照。重装控制器的输入经桌面 `CustomControl.data` 和图传链路送达机器人侧 `0x0311`；装配等赛事请求使用各自的标准Topic。项目选择了重装控制器输入业务，设备接口、控制器样本与机载端认可的载荷格式以队内联调为准。步兵只收状态和UDP图传，全部9类业务上行均禁发，MQTT连接、订阅、保活、确认等协议流量可正常工作。指挥手按既定范围和实际授权发送地图标记、哨兵及飞镖等指令。契约用例与比赛席位的收发证据分别验收。
+
+- 第2章PDF47：MQTT直接承载Protobuf v3二进制，版本≥3.15；Topic严格等于消息名，不加自定义信封；正式服务器192.168.12.1:3333，终端192.168.12.2，client ID为所连机器人ID。开发配置可用本地地址，不自动改系统网卡。
+- 表2-1（PDF47–51）全部消息最高QoS为1，本文每条均采用该上限；附录三PDF83–84示例默认QoS2与概览不一致，记为P-009，采用正文明确最高1，不等待修订；示例不能覆盖上限。订阅/重连、消息新鲜度和命令业务结果分别管理。
+- 下方除repeated项外均为原文optional；区分未携带与显式0/false。未知字段/枚举不伪装为有效业务值；Protobuf可解析不等于字段合法，工程负载/队列上限须另行注明。除自定义字节/地图列表等明确限制外，原文没有为这些MQTT消息给固定序列化长度，不套串口长度。
+- 周期消息按所列频率；触发消息没有固定周期，不能按1Hz缺失判离线。Buff按“获得触发后1Hz至失去”单独处理。记录接收时间只能计算本地新鲜度，不证明发送端时间或跨Topic先后顺序。
+- 第1章为机器人串口/图传/雷达链路，附录一CRC只属对应帧；本客户端默认不直接接串口、不解析A5/CRC或所有0x0301绘图。第1.3.1通过第2章明确引用用于地图频率，0x0310/0x0311用于字节上限核对，其他接口各按自身要求。
+
+## 32条路径覆盖总表
+
+| 序号 | Topic/来源章节 | 方向 | 频率/触发 | 最高QoS | 需求ID | 客户端 | 模拟器 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 01 | `KeyboardMouseControl` / 2.2.1，PDF51–53 | 终端→图传链路→机器人 | 75 Hz | 1 | REQ-036、REQ-037 | 未实现 | 旧接收仅解析打印，尚无75Hz/焦点安全闭环 |
+| 02 | `CustomControl` / 2.2.2，PDF53 | 终端→图传链路→机器人 | 75 Hz | 1 | REQ-038 | 未实现 | 旧接收仅解析打印 |
+| 03 | `GameStatus` / 2.2.3，PDF53–55 | 服务器→终端 | 5 Hz | 1 | REQ-016 | 五类离线codec；会话/UI未接入 | 五类新schema及实际基础发布；已做离线检查，Qt网络未接入 |
+| 04 | `GlobalUnitStatus` / 2.2.4，PDF55–56 | 服务器→终端 | 1 Hz | 1 | REQ-017 | 五类离线codec；会话/UI未接入 | 五类新schema及实际基础发布；已做离线检查，Qt网络未接入 |
+| 05 | `GlobalLogisticsStatus` / 2.2.5，PDF56–57 | 服务器→终端 | 1 Hz | 1 | REQ-018 | 五类离线codec；会话/UI未接入 | 五类新schema及实际基础发布；已做离线检查，Qt网络未接入 |
+| 06 | `GlobalSpecialMechanism` / 2.2.6，PDF57 | 服务器→终端 | 1 Hz | 1 | REQ-024 | 未实现 | 旧工具：有发布/输入痕迹，需迁移；不计为RM27通过 |
+| 07 | `Event` / 2.2.7，PDF58–59 | 服务器→终端 | 触发 | 1 | REQ-025 | 未实现 | 旧工具：有发布/输入痕迹，需迁移；不计为RM27通过 |
+| 08 | `RobotInjuryStat` / 2.2.8，PDF59 | 服务器→终端 | 1 Hz | 1 | REQ-022 | 未实现 | 旧工具：有发布/输入痕迹，需迁移；不计为RM27通过 |
+| 09 | `RobotRespawnStatus` / 2.2.9，PDF60 | 服务器→终端 | 1 Hz | 1 | REQ-023、REQ-031、REQ-032 | 未实现 | 旧工具：有发布/输入痕迹，需迁移；不计为RM27通过 |
+| 10 | `RobotStaticStatus` / 2.2.10，PDF60–62 | 服务器→终端 | 1 Hz | 1 | REQ-008、REQ-019 | 五类离线codec；会话/UI未接入 | 五类新schema及实际基础发布；已做离线检查，Qt网络未接入 |
+| 11 | `RobotDynamicStatus` / 2.2.11，PDF62–63 | 服务器→终端 | 10 Hz | 1 | REQ-020、REQ-030、REQ-033、REQ-034 | 五类离线codec；会话/UI未接入 | 五类新schema及实际基础发布；已做离线检查，Qt网络未接入 |
+| 12 | `RobotModuleStatus` / 2.2.12，PDF63–64 | 服务器→终端 | 1 Hz | 1 | REQ-021、REQ-080 | 未实现 | 旧工具：有发布/输入痕迹，需迁移；不计为RM27通过 |
+| 13 | `RobotPosition` / 2.2.13，PDF64 | 服务器→终端 | 1 Hz | 1 | REQ-040、REQ-045 | 未实现 | 旧工具：有发布/输入痕迹，需迁移；不计为RM27通过 |
+| 14 | `Buff` / 2.2.14，PDF64–65 | 服务器→终端 | 获得时触发，之后1 Hz至失去 | 1 | REQ-026 | 未实现 | 旧工具：有发布/输入痕迹，需迁移；不计为RM27通过 |
+| 15 | `PenaltyInfo` / 2.2.15，PDF65–66 | 服务器→终端 | 触发 | 1 | REQ-027、REQ-028 | 未实现 | 旧工具：有发布/输入痕迹，需迁移；不计为RM27通过 |
+| 16 | `RobotPathPlanInfo` / 2.2.16，PDF66 | 服务器→终端 | 触发 | 1 | REQ-041、REQ-045 | 未实现 | 旧工具：有发布/输入痕迹，需迁移；不计为RM27通过 |
+| 17 | `MapClickInfo` / 2.2.17，PDF66–67 | 服务器→终端 | 触发，限频引用1.3.1 | 1 | REQ-042 | 未实现 | 旧工具：有发布/输入痕迹，需迁移；不计为RM27通过 |
+| 18 | `MapClickCmd` / 2.2.18，PDF67–68 | 终端→服务器 | 触发，限频引用1.3.1 | 1 | REQ-043 | 未实现 | 旧端订阅MapClickInfoNotify，名称/路由待替换 |
+| 19 | `RadarInfoToClient` / 2.2.19，PDF68–69 | 服务器→终端 | 触发 | 1 | REQ-044 | 未实现 | 按P-001有可参考的实际发布器；尚未迁移客户端/验证 |
+| 20 | `CustomByteBlock` / 2.2.20，PDF69 | 机器人→图传链路→终端 | 50 Hz | 1 | REQ-039 | 未实现 | 旧工具：有发布/输入痕迹，需迁移；不计为RM27通过 |
+| 21 | `AssemblyCommand` / 2.2.21，PDF69 | 终端→服务器 | 触发，≤10 Hz | 1 | REQ-046 | 未实现 | 旧端只解析打印 |
+| 22 | `TechCoreMotionStateSync` / 2.2.22，PDF70 | 服务器→终端 | 1 Hz | 1 | REQ-047 | 未实现 | 旧工具：有发布/输入痕迹，需迁移；不计为RM27通过 |
+| 23 | `RobotPerformanceSelectionCommand` / 2.2.23，PDF70–71 | 终端→服务器 | 触发，≤10 Hz | 1 | REQ-029、REQ-049 | 未实现 | 旧工具：有发布/输入痕迹，需迁移；不计为RM27通过 |
+| 24 | `RobotPerformanceSelectionSync` / 2.2.24，PDF71 | 服务器→终端 | 1 Hz | 1 | REQ-029、REQ-049 | 未实现 | 旧工具：有发布/输入痕迹，需迁移；不计为RM27通过 |
+| 25 | `CommonCommand` / 2.2.25，PDF71–72 | 终端→服务器 | 触发，≤10 Hz | 1 | REQ-030、REQ-031、REQ-032、REQ-033、REQ-034 | 未实现 | 旧接收只处理3/4复活；1/2/5/6未形成闭环 |
+| 26 | `RuneActivateCommand` / 2.2.26，PDF72 | 终端→服务器 | 触发，≤10 Hz | 1 | REQ-048 | 未实现 | 旧工具：有发布/输入痕迹，需迁移；不计为RM27通过 |
+| 27 | `RuneStatusSync` / 2.2.27，PDF72–73 | 服务器→终端 | 1 Hz | 1 | REQ-048 | 未实现 | 旧工具：有发布/输入痕迹，需迁移；不计为RM27通过 |
+| 28 | `SentryStatusSync` / 2.2.28，PDF73 | 服务器→终端 | 1 Hz | 1 | REQ-049 | 未实现 | 旧工具：有发布/输入痕迹，需迁移；不计为RM27通过 |
+| 29 | `DartCommand` / 2.2.29，PDF73–74 | 终端→服务器 | 触发，≤10 Hz | 1 | REQ-051 | 未实现 | 旧工具：有发布/输入痕迹，需迁移；不计为RM27通过 |
+| 30 | `DartSelectTargetStatusSync` / 2.2.30，PDF74 | 服务器→终端 | 1 Hz | 1 | REQ-051 | 未实现 | 旧工具：有发布/输入痕迹，需迁移；不计为RM27通过 |
+| 31 | `SentryCtrlCommand` / 2.2.31，PDF74–75 | 终端→服务器 | 触发，≤10 Hz | 1 | REQ-050 | 未实现 | 旧工具：有发布/输入痕迹，需迁移；不计为RM27通过 |
+| 32 | `SentryCtrlResult` / 2.2.32，PDF75 | 服务器→终端 | 触发 | 1 | REQ-050 | 未实现 | 旧工具：有发布/输入痕迹，需迁移；不计为RM27通过 |
+
+## 逐字段契约、业务与异常
+
+各条的字段表与紧接的说明共同定义名称、编号、类型、含义、单位、范围及数组关系；未写明单位处明确留空或登记P-004，不把经验补成官方定义。所有消息都需要协议错误诊断；下行用于相应展示模型，上行由用例限频并显示等待/确认/失败/未知，详见需求及验收文档。
+
+### 01 KeyboardMouseControl
+
+来源：2.2.1，PDF51–53；终端→图传链路→机器人；75 Hz；最高QoS 1。保留键鼠协议样本。步兵由官方端生成键鼠，本队重装控制器的操纵输入走CustomControl。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `mouse_x` | optional int32 | 左右移动，负为左 |
+| 2 | `mouse_y` | optional int32 | 上下移动，负为下 |
+| 3 | `mouse_z` | optional int32 | 滚轮速度，负为后 |
+| 4 | `left_button_down` | optional bool | 左键 |
+| 5 | `right_button_down` | optional bool | 右键 |
+| 6 | `keyboard_value` | optional uint32 | 按键位掩码 |
+| 7 | `mid_button_down` | optional bool | 中键 |
+
+bit0…15依次W/S/A/D/Shift/Ctrl/Q/E/R/F/G/Z/X/C/V/B，仅这16位；比赛前只能选择官方或自定义一个键鼠来源。失焦/断线清键为工程要求。规则的5秒倒计时、阶段0训练和重装战亡装配15秒撤离控制分别处理，不能从stage=0或HP=0统一推出禁止所有控制；身份/控制权限参见P-007。
+
+验收入口：AT-036、AT-037，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 02 CustomControl
+
+来源：2.2.2，PDF53；终端→图传链路→机器人；75 Hz；最高QoS 1。UI：交互：仅已约定数据入口。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `data` | optional bytes | 自定义字节 |
+
+data≤60字节，按表2-1的75Hz及最高QoS 1约束，对应机器人侧0x0311。重装终端将实际控制器输入按队内约定编码到此字段，发布Protobuf消息。这条路径承接旧0x0302方案的用途。26赛季的0x0302和0x0311原本并存。官方协议定义外层通道，具体操纵含义、设备失效和停控语义以队内约定为准。
+
+验收入口：AT-038，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 03 GameStatus
+
+来源：2.2.3，PDF53–55；服务器→终端；5 Hz；最高QoS 1。UI：显示。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `current_round` | optional uint32 | 当前局号从1开始 |
+| 2 | `total_rounds` | optional uint32 | 总局数 |
+| 3 | `red_score` | optional uint32 | 红方得分 |
+| 4 | `blue_score` | optional uint32 | 蓝方得分 |
+| 5 | `current_stage` | optional uint32 | 当前阶段 |
+| 6 | `stage_countdown_sec` | optional int32 | 阶段剩余秒 |
+| 7 | `stage_elapsed_sec` | optional int32 | 阶段已过秒 |
+| 8 | `is_paused` | optional bool | 暂停 |
+| 9 | `game_result` | optional uint32 | 当局胜者 |
+| 10 | `end_reason` | optional uint32 | 结束原因 |
+
+stage=0未开始/1准备/2十五秒自检/3五秒倒计时/4比赛/5结算；result=0平/1红/2蓝，非结算255；end_reason=1基地/2控制度/3总攻击伤害/4总剩余血量/5平局/6异常终止/7主裁判判定，非结算255；时间保留有符号。
+
+验收入口：AT-016，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 04 GlobalUnitStatus
+
+来源：2.2.4，PDF55–56；服务器→终端；1 Hz；最高QoS 1。UI：显示。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `base_health` | optional uint32 | 己方基地血量 |
+| 2 | `base_status` | optional uint32 | 己方基地状态 |
+| 3 | `base_shield` | optional uint32 | 己方基地阵地控制状态 |
+| 4 | `outpost_R_health` | optional uint32 | R前哨血量 |
+| 5 | `outpost_R_status` | optional uint32 | R前哨阵地状态 |
+| 6 | `enemy_base_health` | optional uint32 | 敌方基地血量 |
+| 7 | `enemy_base_status` | optional uint32 | 敌方基地状态 |
+| 8 | `enemy_base_shield` | optional uint32 | 敌方基地阵地控制状态 |
+| 9 | `outpost_B_health` | optional uint32 | B前哨血量 |
+| 10 | `outpost_B_status` | optional uint32 | B前哨阵地状态 |
+| 11 | `robot_health` | repeated uint32 | 八项血量 |
+| 12 | `robot_bullets` | repeated int32 | 己方剩余累计发弹量 |
+| 13 | `total_damage_ally` | optional uint32 | 己方总伤害 |
+| 14 | `total_damage_enemy` | optional uint32 | 敌方总伤害 |
+| 15 | `total_CP_ally` | optional uint32 | 己方累计控制度 |
+| 16 | `total_CP_enemy` | optional uint32 | 敌方累计控制度 |
+
+血量己1/3/4/7再敌1/3/4/7，蓝视角换ID而R/B不换；base_status=0有100%防御/1无且甲未展/2无且甲展开；base_shield=1己完全/2敌临时，enemy相反；前哨状态=1己完全/2己临时/3敌临时/4敌完全。P-002弹量按己[1,2,3,4,6,7]六槽（蓝加100），2/102保留且模拟器发0，负值不钳成0。
+
+验收入口：AT-017，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 05 GlobalLogisticsStatus
+
+来源：2.2.5，PDF56–57；服务器→终端；1 Hz；最高QoS 1。UI：显示。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `remaining_economy` | optional uint32 | 当前经济 |
+| 2 | `total_economy_obtained` | optional uint64 | 累计经济 |
+| 3 | `tech_level` | optional uint32 | 重装成功最高装配难度 |
+| 4 | `encryption_level` | optional uint32 | 雷达加密等级 |
+
+累计经济网页以十进制字符串保持uint64精度；不能沿用旧工程科技等级语义。
+
+验收入口：AT-018，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 06 GlobalSpecialMechanism
+
+来源：2.2.6，PDF57；服务器→终端；1 Hz；最高QoS 1。UI：显示。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `mechanism_id` | repeated uint32 | 生效机制列表 |
+| 2 | `mechanism_time_sec` | repeated int32 | 对应时间参数秒 |
+
+两数组逐项对应且长度一致；ID=1己堡垒被敌激活/2敌堡垒被己激活/3R前哨/4B前哨/5R基地/6B基地；3…6时间符号<0敌推进、>0己推进、0无变化。
+
+验收入口：AT-024，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 07 Event
+
+来源：2.2.7，PDF58–59；服务器→终端；触发；最高QoS 1。UI：显示。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `event_id` | optional int32 | 事件编号 |
+| 2 | `param` | optional string | 按事件解释参数 |
+
+ID1击杀(被杀,击杀)；2前哨摧毁目标ID；3大机关(灯臂数,平均环数float)；4机关已激活类型1小2大；5/6 R/B前哨变更(1红临时2红完全3蓝临时4蓝完全)；7R基地(1红完全2蓝临时)；8B基地(1蓝完全2红临时)；9飞镖(命中方1红2蓝,目标1…5)；10敌闸门开；11基地受击(5秒内置冷却)；12敌前哨停转；13敌基地展甲；14重装战亡临时激活进入缓冲；15装配结果0成功1拔出2超时3离区过久4战亡5四级协作超时6主动退出7无能量单元8缓冲到期；16成功装模块42mm。未知ID/非法参数保留原文并诊断，不据事件猜权威遮挡起点。
+
+验收入口：AT-025，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 08 RobotInjuryStat
+
+来源：2.2.8，PDF59；服务器→终端；1 Hz；最高QoS 1。UI：显示。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `total_damage` | optional uint32 | 本次存活总受伤 |
+| 2 | `collision_damage` | optional uint32 | 撞击 |
+| 3 | `small_projectile_damage` | optional uint32 | 17mm |
+| 4 | `large_projectile_damage` | optional uint32 | 42mm |
+| 5 | `dart_splash_damage` | optional uint32 | 飞镖溅射 |
+| 6 | `module_offline_damage` | optional uint32 | 模块离线 |
+| 7 | `offline_damage` | optional uint32 | 异常离线 |
+| 8 | `penalty_damage` | optional uint32 | 判罚 |
+| 9 | `server_kill_damage` | optional uint32 | 服务器强制战亡 |
+| 10 | `killer_id` | optional uint32 | 击杀者ID，0未检测 |
+
+以一次存活为窗口，复活后用新权威统计，不把旧局缓存叠加。
+
+验收入口：AT-022，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 09 RobotRespawnStatus
+
+来源：2.2.9，PDF60；服务器→终端；1 Hz；最高QoS 1。UI：显示。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `is_pending_respawn` | optional bool | 待复活 |
+| 2 | `total_respawn_progress` | optional uint32 | 总读条 |
+| 3 | `current_respawn_progress` | optional uint32 | 当前进度 |
+| 4 | `can_free_respawn` | optional bool | 可免费复活 |
+| 5 | `gold_cost_for_respawn` | optional uint32 | 付费金币 |
+| 6 | `can_pay_for_respawn` | optional bool | 可付费 |
+
+读条不自定成秒；免费/付费资格与命令3/4对应；最终成功依权威存活状态，非点击即成功。
+
+验收入口：AT-023、AT-031、AT-032，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 10 RobotStaticStatus
+
+来源：2.2.10，PDF60–62；服务器→终端；1 Hz；最高QoS 1。UI：显示。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `connection_state` | optional uint32 | 0未连接1连接 |
+| 2 | `field_state` | optional uint32 | 0上场1未上场 |
+| 3 | `alive_state` | optional uint32 | 0未知1存活2战亡 |
+| 4 | `robot_id` | optional uint32 | 附录ID |
+| 5 | `robot_type` | optional uint32 | P-003类型原值 |
+| 6 | `performance_system_shooter` | optional uint32 | 发射性能 |
+| 7 | `performance_system_chassis` | optional uint32 | 底盘性能 |
+| 8 | `level` | optional uint32 | 等级 |
+| 9 | `max_health` | optional uint32 | 血量上限 |
+| 10 | `max_heat` | optional uint32 | 热量上限 |
+| 11 | `heat_cooldown_rate` | optional float | 每秒冷却 |
+| 12 | `max_power` | optional uint32 | 最大功率 |
+| 13 | `max_buffer_energy` | optional uint32 | 最大缓冲能量 |
+| 14 | `max_chassis_energy` | optional uint32 | 最大底盘能量 |
+
+shooter=1冷却/2爆发，chassis=1血量/2功率；P-003按有效ID优先、类型后备，1重装2保留3/4/5步兵6空中7哨兵8飞镖9雷达；类型0/10/11/其他未知，不补ID或阵营。单位未在本表注明的不补写物理单位。
+
+验收入口：AT-008、AT-019，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 11 RobotDynamicStatus
+
+来源：2.2.11，PDF62–63；服务器→终端；10 Hz；最高QoS 1。UI：显示。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `current_health` | optional uint32 | 当前血量 |
+| 2 | `current_heat` | optional float | 热量 |
+| 3 | `last_projectile_fire_rate` | optional float | 上次弹丸射速 |
+| 4 | `reserved` | optional uint32 | 保留位 |
+| 5 | `current_buffer_energy` | optional uint32 | 缓冲能量 |
+| 6 | `current_experience` | optional uint32 | 当前经验 |
+| 7 | `experience_for_upgrade` | optional uint32 | 距下级仍需经验 |
+| 8 | `total_projectiles_fired` | optional uint32 | 累计发弹 |
+| 9 | `remaining_ammo` | optional uint32 | 剩余允许发弹量 |
+| 10 | `is_out_of_combat` | optional bool | 脱战 |
+| 11 | `out_of_combat_countdown` | optional uint32 | 脱战倒计时 |
+| 12 | `can_remote_heal` | optional bool | 可远程回血 |
+| 13 | `can_remote_ammo` | optional bool | 可远程补弹 |
+
+4不得解释旧底盘能量；9为规则允许量不是弹仓实弹；本小节未标倒计时单位、射速物理单位或热量摄氏度，不自行添加。
+
+验收入口：AT-020、AT-030、AT-033、AT-034，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 12 RobotModuleStatus
+
+来源：2.2.12，PDF63–64；服务器→终端；1 Hz；最高QoS 1。UI：显示。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `power_manager` | optional uint32 | 电源管理 |
+| 2 | `rfid` | optional uint32 | RFID |
+| 3 | `light_strip` | optional uint32 | 灯条 |
+| 4 | `small_shooter` | optional uint32 | 17mm测速 |
+| 5 | `big_shooter` | optional uint32 | 42mm测速 |
+| 6 | `uwb` | optional uint32 | 定位 |
+| 7 | `armor` | optional uint32 | 装甲 |
+| 8 | `video_transmission` | optional uint32 | 图传 |
+| 9 | `capacitor` | optional uint32 | 电容 |
+| 10 | `main_controller` | optional uint32 | 主控 |
+| 11 | `modular_42mm` | optional uint32 | 仅重装安装权限 |
+
+1…10枚举=0离线/1在线/2安装不规范视为离线；11=0无权限/1有权限，不能当第11个在线模块。未收到不显示全部正常。
+
+验收入口：AT-021、AT-080，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 13 RobotPosition
+
+来源：2.2.13，PDF64；服务器→终端；1 Hz；最高QoS 1。UI：显示。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `x` | optional float | 世界X |
+| 2 | `y` | optional float | 世界Y |
+| 3 | `z` | optional float | 世界Z |
+| 4 | `yaw` | optional float | 测速模块朝向，度、正北0 |
+| 5 | `robot_id` | optional uint32 | 归属ID，7/107仅指挥手端生效 |
+
+P-004：x/y/z单位、原点、轴方向未在本接口明确；原值诊断可做，地图换算待依据，不能从串口0x0203自动借m。
+
+验收入口：AT-040、AT-045，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 14 Buff
+
+来源：2.2.14，PDF64–65；服务器→终端；获得时触发，之后1 Hz至失去；最高QoS 1。UI：显示。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `robot_id` | optional uint32 | 归属ID |
+| 2 | `buff_type` | optional uint32 | 类型 |
+| 3 | `buff_level` | optional int32 | 增益值 |
+| 4 | `buff_max_time` | optional uint32 | 最大剩余时间 |
+| 5 | `buff_left_time` | optional uint32 | 剩余时间 |
+
+type=1攻击2防御/易伤3冷却4功率5回血6可兑换弹量7地形跨越预备；1/2/4/5的值为百分比，3为冷却增加x/s且非整数四舍五入；其余不猜数值语义。6/7不能伪装攻击增益；时间字段本节未标单位，保留原值待P-004明确。死亡生命周期按增益来源：场地临时战亡清除，非场地临时按规则保留，不统一全清。死亡生命周期按增益来源：场地临时战亡清除，非场地临时按规则保留，不统一全清。死亡生命周期按增益来源：场地临时战亡清除，非场地临时按规则保留，不统一全清。
+
+验收入口：AT-026，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 15 PenaltyInfo
+
+来源：2.2.15，PDF65–66；服务器→终端；触发；最高QoS 1。UI：显示。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `penalty_type` | optional uint32 | 类型 |
+| 2 | `penalty_effect_sec` | optional uint32 | 时长秒 |
+| 3 | `total_penalty_num` | optional uint32 | 数量 |
+
+type=1黄牌2双方黄牌3红牌4超功率5超热6超射速；按事件消息处理、不自设1Hz超时；完整限制状态来源见P-005。
+
+验收入口：AT-027、AT-028，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 16 RobotPathPlanInfo
+
+来源：2.2.16，PDF66；服务器→终端；触发；最高QoS 1。UI：显示。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `intention` | optional uint32 | 1攻击2防守3移动 |
+| 2 | `start_pos_x` | optional uint32 | 起点X分米 |
+| 3 | `start_pos_y` | optional uint32 | 起点Y分米 |
+| 4 | `offset_x` | repeated int32 | 相对起点X增量，-128…127、49项 |
+| 5 | `offset_y` | repeated int32 | 相对起点Y增量，-128…127、49项 |
+| 6 | `sender_id` | optional uint32 | 发送者 |
+
+4/5 packed=true；MQTT按相对起点计算，不复制串口0x0307逐点累加；本节未写增量单位及坐标基准，P-004待确认，先验证长度范围与原值。
+
+验收入口：AT-041、AT-045，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 17 MapClickInfo
+
+来源：2.2.17，PDF66–67；服务器→终端；触发，限频引用1.3.1；最高QoS 1。UI：显示。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `is_send_all` | optional uint32 | 0指定端1除哨兵2含哨兵 |
+| 2 | `robot_id` | optional bytes | 固定7字节接收ID列表，不足填0 |
+| 3 | `mode` | optional uint32 | 标记类型1攻击2防御3警戒4自定义 |
+| 4 | `enemy_id` | optional uint32 | 标定敌方ID |
+| 5 | `ascii` | optional uint32 | 自定义图标ASCII |
+| 6 | `type` | optional uint32 | 标记模式1地图2敌机器人 |
+| 7 | `map_x` | optional float | 地图X |
+| 8 | `map_y` | optional float | 地图Y |
+
+ASCII仅C…L/N/O/Q…Z且mode=4时有效；红[1,7,0…]、蓝[101,107,0…]用原字节，不发文本或选手端ID。频率按1.3.1原文旧称：云台手≥0.5秒、半自动机器人操作手≥3秒；2027规则已取消云台手，实际指挥手/操作端映射按P-007核实；不要把服务器对串口的重复发送机制移植为客户端主动重发。坐标单位与基准见P-004。
+
+验收入口：AT-042，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 18 MapClickCmd
+
+来源：2.2.18，PDF67–68；终端→服务器；触发，限频引用1.3.1；最高QoS 1。指挥手在获准范围内选择目标、发送标记并查看同步。步兵只收适用标记。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `is_send_all` | optional uint32 | 0指定端1除哨兵2含哨兵 |
+| 2 | `robot_id` | optional bytes | 固定7字节接收ID列表，不足填0 |
+| 3 | `mode` | optional uint32 | 标记类型1攻击2防御3警戒4自定义 |
+| 4 | `enemy_id` | optional uint32 | 标定敌方ID |
+| 5 | `ascii` | optional uint32 | 自定义图标ASCII |
+| 6 | `type` | optional uint32 | 标记模式1地图2敌机器人 |
+| 7 | `map_x` | optional float | 地图X |
+| 8 | `map_y` | optional float | 地图Y |
+
+ASCII仅C…L/N/O/Q…Z且mode=4时有效；红[1,7,0…]、蓝[101,107,0…]用原字节，不发文本或选手端ID。频率按1.3.1原文旧称：云台手≥0.5秒、半自动机器人操作手≥3秒；2027规则已取消云台手，实际指挥手/操作端映射按P-007核实；不要把服务器对串口的重复发送机制移植为客户端主动重发。坐标单位与基准见P-004。
+
+验收入口：AT-043，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 19 RadarInfoToClient
+
+来源：2.2.19，PDF68–69；服务器→终端；触发；最高QoS 1。UI：显示：雷达坐标与特殊标识。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `robot_info` | repeated RadarSingleRobotInfo | 用户指定模拟器基准；非原文完整schema |
+
+官方示例 repeated uint32 RadarSingleRobotInfo 缺字段号，不能编译。原表规定敌1/3/4/7再己1/3/4/7八项；P-001明确允许按实际模拟器：敌[1,2,3,4,6,7]再己[1,2,3,4,6,7]共12槽（阵营各加100），2/102仅保留槽。实际源码robot_info=1；缺位置发送0；坐标从模拟器内部值×100。用户约定待实现，不称官方补全。
+
+子结构 `RadarSingleRobotInfo`（官方给出的子字段及指定模拟器使用的结构）：
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `target_pos_x` | optional uint32 | 位置X，cm |
+| 2 | `target_pos_y` | optional uint32 | 位置Y，cm |
+| 3 | `is_high_light` | optional uint32 | 0无特殊标识，1有，2有但定位离线 |
+
+实际基准证据：当前 `simulator/protocol/robomaster.proto` 的 `RadarInfoToClient.robot_info`、`simulator/server/mqtt_publisher.py::publish_radar_info_to_client()`，参考 `../RM26_Client/src/core/GameData.cpp::updateRadarInfo`；实施时再次核对这些实码，不按本段臆造缺失结构。
+
+验收入口：AT-044，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 20 CustomByteBlock
+
+来源：2.2.20，PDF69；机器人→图传链路→终端；50 Hz；最高QoS 1。UI：显示。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `data` | optional bytes | 自定义数据流 |
+
+≤2.4kbit=300字节（同1.4.1的0x0310 300字节）；不将工业相机大帧私有信封冒充本通道规范。
+
+验收入口：AT-039，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 21 AssemblyCommand
+
+来源：2.2.21，PDF69；终端→服务器；触发，≤10 Hz；最高QoS 1。UI：交互：难度/开始/确认/取消。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `operation` | optional uint32 | 0开始兑换1确认装配2取消装配 |
+| 2 | `difficulty` | optional uint32 | 装配难度 |
+
+按重装权限、可选最高难度与规则条件执行；取消/失败/超时不可当成功。
+
+验收入口：AT-046，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 22 TechCoreMotionStateSync
+
+来源：2.2.22，PDF70；服务器→终端；1 Hz；最高QoS 1。UI：显示。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `maximum_difficulty_level` | optional uint32 | 可选最高难度 |
+| 2 | `basic_state` | optional uint32 | 1初始2运动3到位 |
+| 3 | `putin_state` | optional uint32 | 0未放1已放 |
+| 4 | `move_state` | optional uint32 | 0未平移1已平移 |
+| 5 | `rotate_state` | optional uint32 | 0未旋转1已旋转 |
+| 6 | `enemy_core_status` | optional uint32 | 0敌无装配1敌非四级2敌四级 |
+| 7 | `remain_time_all` | optional uint32 | 己装配总剩余时长 |
+| 8 | `remain_time_step` | optional uint32 | 单步骤间隔剩余时长 |
+
+6仅己方四级可用有效；7仅己四级进行时有效；8己四级或战亡临时激活缓冲有效；本节未写时间单位，不借字段名猜秒，P-004。
+
+验收入口：AT-047，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 23 RobotPerformanceSelectionCommand
+
+来源：2.2.23，PDF70–71；终端→服务器；触发，≤10 Hz；最高QoS 1。本队步兵读取官方端选择的同步结果；指挥手按赛前条件和权限提交哨兵控制方式，等待权威同步。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `shooter` | optional uint32 | 发射性能 |
+| 2 | `chassis` | optional uint32 | 底盘性能 |
+| 3 | `sentry_control` | optional uint32 | 哨兵控制方式 |
+
+shooter/chassis参考静态消息1/2；sentry_control=0自动/1半自动；阶段限制按规则，不默认赛中可改。
+
+验收入口：AT-029、AT-049，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 24 RobotPerformanceSelectionSync
+
+来源：2.2.24，PDF71；服务器→终端；1 Hz；最高QoS 1。UI：显示。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `shooter` | optional uint32 | 发射性能 |
+| 2 | `chassis` | optional uint32 | 底盘性能 |
+| 3 | `sentry_control` | optional uint32 | 哨兵控制方式 |
+
+表2-1称步兵/重装，详细小节用途只称步兵但字段含哨兵控制；按规则对应角色使用，不能据简略用途删除sentry_control。
+
+验收入口：AT-029、AT-049，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 25 CommonCommand
+
+来源：2.2.25，PDF71–72；终端→服务器；触发，≤10 Hz；最高QoS 1。UI：交互：按状态校验请求并显示权威结果。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `cmd_type` | optional uint32 | 命令类型 |
+| 2 | `param` | optional uint32 | 对应参数 |
+
+1兑换17mm（经济够、参数10的倍数）；2兑换42mm（经济够）；3确认复活（读条完成才立即复活）；4付费立即复活（条件满足）；5远程兑换允许发弹量；6远程兑换血量。原文只明确 cmd1 参数为 10 的倍数。规则表5-7/8/9规定普通 42mm 最小兑换单位为 1 发，线上 cmd2 参数含义仍未确定；cmd3…6 的具体参数值和解释也未给全。受影响发送按 [P-006](09_Open_Questions.md#p-006commoncommand部分param业务编码缺失) 待核验。旧机器人索引、0/1、optional 省略均不能作为编码依据。
+
+验收入口：AT-030、AT-031、AT-032、AT-033、AT-034，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 26 RuneActivateCommand
+
+来源：2.2.26，PDF72；终端→服务器；触发，≤10 Hz；最高QoS 1。本队步兵只显示机关状态，激活由官方端操作。该上行消息在独立协议测试中验证。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `activate` | optional uint32 | 1开启 |
+
+阶段/角色/机关可用性按规则；不是发送后本地立即激活。
+
+验收入口：AT-048，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 27 RuneStatusSync
+
+来源：2.2.27，PDF72–73；服务器→终端；1 Hz；最高QoS 1。UI：显示。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `rune_status` | optional uint32 | 1未激活2正在激活3已激活 |
+| 2 | `activated_arms` | optional uint32 | 已激活灯臂数 |
+| 3 | `average_rings` | optional float | 平均环数 |
+
+average_rings仅大机关正在激活时有效，其他状态0，不沿用旧进度字段。
+
+验收入口：AT-048，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 28 SentryStatusSync
+
+来源：2.2.28，PDF73；服务器→终端；1 Hz；最高QoS 1。UI：显示。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `posture_id` | optional uint32 | 1进攻2防御3移动 |
+| 2 | `is_weakened` | optional bool | 弱化 |
+| 3 | `is_powered` | optional bool | 强化 |
+
+不要复制串口或旧界面的1…6合并姿态枚举；弱化/强化保持独立字段。
+
+验收入口：AT-049，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 29 DartCommand
+
+来源：2.2.29，PDF73–74；终端→服务器；触发，≤10 Hz；最高QoS 1。UI：交互：选目标/开关门/确认发射。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `target_id` | optional uint32 | 目标1前哨2基地固定3随机固定4随机移动5末端移动 |
+| 2 | `open` | optional bool | 闸门开关 |
+| 3 | `launch_confirm` | optional bool | 是否确认发射，默认0、1确认 |
+
+请求与闸门实际状态分开；发射不在重连后自动重放。
+
+验收入口：AT-051，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 30 DartSelectTargetStatusSync
+
+来源：2.2.30，PDF74；服务器→终端；1 Hz；最高QoS 1。UI：显示。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `target_id` | optional uint32 | 目标ID |
+| 2 | `open` | optional uint32 | 闸门0关闭1开启中2已开 |
+
+下行open是uint32三态，上行是bool，不强行统一类型。
+
+验收入口：AT-051，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 31 SentryCtrlCommand
+
+来源：2.2.31，PDF74–75；终端→服务器；触发，≤10 Hz；最高QoS 1。UI：交互：指挥干预并等待结果。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `command_id` | optional uint32 | 请求指令编号 |
+
+0无效；1补血点补弹；3远程补弹；4远程回血；5确认复活；6确认花金币复活；7/8/9进攻/防御/移动；10/11/12强化对应姿态。2未定义，不填补。
+
+验收入口：AT-050，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+### 32 SentryCtrlResult
+
+来源：2.2.32，PDF75；服务器→终端；触发；最高QoS 1。UI：显示。
+
+| 编号 | 字段名 | Protobuf类型/存在性 | 含义/单位 |
+| --- | --- | --- | --- |
+| 1 | `command_id` | optional uint32 | 对应指令编号 |
+| 2 | `result_code` | optional uint32 | 0成功，其他失败 |
+
+保留非零原码；协议无请求流水号，同command_id并发请求须串行或显式无法唯一关联，不虚构官方请求ID。
+
+验收入口：AT-050，另共同执行REQ-006/007/011/063/064的编解码、方向、频率、边界与端到端检查。
+
+## UDP视频独立覆盖
+
+2026-11-17，本机模拟发送器的完整 Annex B 访问单元已接入步兵模拟会话的后台解码。窗口显示实际解码后的帧数及尺寸。等待输入的预算和本机录屏的收尾策略见 [11 架构](11_Architecture.md)，官方帧边界仍按 [09](09_Open_Questions.md#已有定义或仅缺验证不当成新协议冲突) 记录。
+
+| 接口 | 官方契约 | 关联需求 | 当前差距 |
+| --- | --- | --- | --- |
+| UDP/3334，PDF47（印46） | 终端监听 HEVC/H.265，1920×1080，60 帧/秒，无重传。8 字节大端头依次是帧号 u16、帧内片号 u16、整帧字节数 u32。整包最多 1400 字节，净数据最多 1392 字节 | REQ-052、REQ-053、REQ-054、REQ-055、REQ-056 | 步兵席保留原始片号及收包计数。网页后端和独立发送器均从片 0 开始，帧号按 16 位回绕。模拟会话可对回环来源按此约定重组，交付长度与声明相符的连续字节。官方来源的片号起点、码流边界及设备兼容性见 [09](09_Open_Questions.md#已有定义或仅缺验证不当成新协议冲突) |
+
+## 覆盖结论与适用范围
+
+第2章32种消息=9种上行+23种下行，已全部列入矩阵与字段表（含1种雷达子结构）。实际独立业务需求不能按32条消息计数。五条基础消息仅离线codec及模拟器基础发布已完成；其余27条必须迁移或新增，旧schema存在不表示符合RM27。UDP另行覆盖。P-001允许的雷达临时线格式单独标注，不与官方有缺陷示例混为一个来源。
+
+保留的串口ID、图传数据及雷达无线数据在本次均作接口边界审计，未承诺由桌面客户端直接收发。若未来明确增加串口桥接，应新建需求、任务与验收，不把本次“32/32规划覆盖”说成整本协议所有硬件接口均已开发。
+
+## 本轮实际收发支持证据补充
+
+以下为 2026-11-02 审计基线，详细实码入口在 05 第 9/10 节，后续结果见 [13 进度日志](13_Progress_Log.md)；表中的“旧工具”只表示存在历史路径。本轮只读，没有重跑功能检查。
+
+| 路径 | 实际代码证据与边界 | 对应开发 |
+| --- | --- | --- |
+| 五类周期 | mqtt_publisher.py的5Hz/1Hz/10Hz循环仅对应五类新基础消息；BasicCodec/BasicData未接ClientSession/QML | REQ-006/011/015..020/062/063 |
+| 网页只改状态 | app.py的机制/伤害/性能同步/哨兵状态分支只更新StateManager，新周期循环未发这些Topic | REQ-022/024/029/049/062/064 |
+| 手动旧发布 | 模块/路径/Event/Buff/CustomByteBlock/Penalty有手动旧发布入口；不表示字段和规则符合2027 | REQ-021/025/026/027/039/041/062 |
+| 旧上行处理 | 键鼠/CustomControl/Assembly/旧地图解析打印；CommonCommand仅3/4；性能/哨兵/飞镖/机关有旧处理和部分同步，不算本季通过 | REQ-012/029..038/043/046/048/049/050/051/062 |
+| 错Topic/旧角色 | 订阅MapClickInfoNotify而非MapClickCmd；HeroDeployMode/AirSupport残留，不能按2027新增支持 | REQ-010/043/062/073 |
+| Qt数据链 | ClientApplication仅MockDataSource或UnavailableDataSource，ClientSnapshot仅演示；23下行和9上行无Qt真实收发路径 | REQ-009..015/064 |
+
+消息频率是发送端契约；客户端记录接收统计/容差与链路丢包不等于保证网络每秒必达。没有官方时间戳/请求流水号的消息不补造，跨Topic因果只能保留可追溯观察，不伪称事务确认。
+
+## 第1章全部硬件接口清点：32个命令码与9组交互子内容
+
+审阅依据：固定《RoboMaster 2027 机甲大师高校系列赛通信协议 V1.0.0（20261029）》第1章，PDF阅读器第4–46页；表1-5总表在PDF6–8。下文页号均为阅读器页号，印刷页号减1。已顺序阅读本章全部文本、表格和C声明，并渲染核对PDF30、32、33页的交互头、字符和密钥表格，未用旧赛季`proto`替代。此清点给出每种接口的处置，不将“不由桌面直连”算作消息漏项，也不把业务内容相近的两种链路当作同一种线格式。
+
+共同方向与状态口径：
+
+- **串口/常规链路（串）**：服务器或主控→机器人，或机器人经裁判服务器互传；本桌面只接第2章MQTT，当前及计划默认不直接接串口，不解析这些A5帧。相关内容只通过第2章明确提供的消息展示/操作；没有对应MQTT的内容保持硬件侧，不伪造新Topic。
+- **图传字节通道（字）**：硬件0x0310/0311与MQTT `CustomByteBlock`/`CustomControl`有关联；桌面使用第2章Protobuf封装，机器人仍处理自己的串口帧。不得在桌面再套A5/CRC。
+- **雷达无线（雷）**：信号发射源→雷达；本桌面不直连无线接收/破解设备，不因字段可读而取得显示对方完整数据的权限。P-001只覆盖现有`RadarInfoToClient`临时接收约定，不授权移植全部雷达无线业务。
+- **当前模拟器**：没有上述32种官方串口/无线接口的完整合规实现或验证。`server/protocol.py`、`udp_sender.py`、`udp_receiver.py`有旧简化/CRC UDP工具，其相似命令码及自定义扩展字段不构成官方串口支持。五类新MQTT、旧字节发布/接收工具、旧雷达发布器的实际范围分别按本文件第2章矩阵及[当前缺口](05_Current_Gap_Analysis.md)记录。
+- 表中QoS均为“不适用”，硬件帧不使用MQTT QoS；表列长度为data段长度，不含帧头/命令码/CRC，也不移用为MQTT序列化长度。`@偏移:类型 字段`来自原文C声明；没有C声明处用字节偏移/大小，不推定符号位或类型。
+
+### 1. 帧和链路共同边界
+
+PDF4–5，表1-1～1-4：串口8数据位、1停止位、无流控、无校验；电源管理User串口115200，图传发送端串口921600。帧为5B `frame_header` + 2B `cmd_id` + nB data + 2B CRC16。帧头：`@0:1B SOF=0xA5`、`@1:2B data_length`、`@3:1B seq`、`@4:1B CRC8`。两条串口链路和雷达无线各有独立接入端，不能让桌面UDP视频接收器复用串口状态解析器。
+
+对应REQ-006、REQ-063、REQ-073；验收需证明桌面只发允许的第2章Topic，字节通道没有二次加硬件信封，模拟器旧UDP工具始终被明确标识并独立选择。附录一CRC供硬件接口参考，当前桌面不新增CRC功能任务。
+
+### 2. 表1-5全部32个命令码
+
+表中“串/字/雷”的桌面与模拟器处置见上文，逐行关联ID是语义追溯关系，不表示应把硬件命令重新实现一遍。
+
+| 编号 | 命令/来源表、PDF页 | 方向、频率或触发 | data长度B | 全字段/子结构索引 | 桌面处置、关联需求 |
+| --- | --- | --- | --- | --- | --- |
+| HW-01 | `0x0001`，表1-6，8–9 | 服务器→全体机器人，1Hz | 11 | `@0:uint8`低4位game_type、高4位game_progress；`@1:uint16 stage_remain_time`秒；`@3:uint64 SyncTimeStamp` UNIX时间，仅NTP正确连接时有效 | 串；通过`GameStatus`显示第2章提供的信息；REQ-016、REQ-006 |
+| HW-02 | `0x0002`，表1-7，9 | 服务器→全体机器人，比赛结束触发 | 1 | `@0:uint8 winner`，0平/1红胜/2蓝胜 | 串；`GameStatus.game_result/end_reason`权威结算；REQ-016 |
+| HW-03 | `0x0003`，表1-8，9–10 | 服务器→全体机器人，3Hz | 24 | `@0:uint16 ally_1_robot_HP`；`@2:uint16 reserved`；`@4/6:uint16 ally_3/4_robot_HP`；`@8:int16 damage_difference`；`@10:uint16 ally_7_robot_HP`；`@12:uint16 outpost_R_HP`；`@14:uint16 ally_base_HP`；`@16:uint16 outpost_B_HP`；`@18:uint16 enemy_base_HP`；`@20/22:uint16 ally/enemy_control_degree` | 串；第2章`GlobalUnitStatus`字段与数组单独实现，不能套用该12槽长度；REQ-017 |
+| HW-04 | `0x0101`，表1-9，10–13 | 服务器→己方全体机器人，1Hz | 8 | `@0:uint32 event_data`、`@4:uint32 event_data_2`，全部位域见下节 | 串；`GlobalSpecialMechanism`、Event、Buff、全局控制状态按各自定义，不把8B数据强映射为完整MQTT状态；REQ-017、REQ-024、REQ-025、REQ-026 |
+| HW-05 | `0x0104`，表1-10，13 | 服务器→被判罚方全体机器人，判罚/判负触发，其他时间1Hz | 3 | `@0:uint8 level`，1双方黄/2黄/3红/4判负；`@1:uint8 offending_robot_id`，判负及双方黄为0；`@2:uint8 count`相应等级次数 | 串；MQTT `PenaltyInfo`独立枚举与字段，不照搬此4值；REQ-027、REQ-028 |
+| HW-06 | `0x0105`，表1-11，13–14 | 服务器→己方全体机器人，1Hz | 3 | `@0:uint8 dart_remaining_time`秒；`@1:uint16 dart_info`：b0–2最近目标，b3–5该目标累计命中次数0..4，b6–8当前选定目标，b9–15保留；不同目标编码按本表 | 串；`DartCommand`/`DartSelectTargetStatusSync`独立定义，不沿用此位值；REQ-051 |
+| HW-07 | `0x0201`，表1-12，14–15 | 主控→对应机器人，10Hz | 17 | `@0:uint8 robot_id`；`@1:uint8 robot_level`；`@2/4:uint16 current_HP/maximum_HP`；`@6:uint16 shooter_barrel_cooling_value`；`@8:uint16 shooter_barrel_heat_limit`；`@10:uint16 chassis_power_limit`；`@12:float bullet_speed_limit`；`@16:uint8` b0/1/2分别gimbal/chassis/shooter输出 | 串；MQTT静态/动态/模块状态分别实现，不能猜射击初速度字段在MQTT中的不存在映射；REQ-019、REQ-020、REQ-021 |
+| HW-08 | `0x0202`，表1-13，15 | 主控→对应机器人，10Hz | 14 | `@0:2B reserved`；`@2:2B reserved`；`@4:4B reserved`；`@8:uint16 buffer_energy`J；`@10:uint16 shooter_17mm_barrel_heat`；`@12:uint16 shooter_42mm_barrel_heat`；示例重复使用reserved标识符，仅按偏移记录 | 串；不能以旧UDP功率热量包或重复C字段名补造业务；`RobotDynamicStatus.reserved`仍按其本身定义；REQ-020、REQ-006 |
+| HW-09 | `0x0203`，表1-14，15–16 | 主控→对应机器人，1Hz | 12 | `@0/4/8:float x/y/angle`，x/y米，angle度、正北0 | 串；MQTT`RobotPosition`独立坐标定义；REQ-040、REQ-045 |
+| HW-10 | `0x0204`，表1-15，16 | 服务器→对应机器人，3Hz | 7 | `@0:uint8 recovery_buff`%/秒；`@1:uint16 cooling_buff`热量增加冷却值/s；`@3:uint8 defence_buff`%；`@4:uint8 vulnerability_buff`负防御%；`@5:uint16 attack_buff`% | 串；MQTT`Buff`是类型/等级/时长消息，不用该C结构代替；REQ-026 |
+| HW-11 | `0x0206`，表1-16，16–17 | 主控→对应机器人，伤害发生后即时 | 7 | `@0:uint8`低4位armor_id、高4位HP_deduction_reason；`@1:uint16 hit_sequence`；`@3/5:int16 hit_position_x/y`mm，装甲检测面左下原点。原因0弹击/1装甲离线/2电容离线/5撞击。机器人本地判定，实际伤害以服务器最终为准 | 串；不伪造MQTT命中坐标消息，客户端现有`RobotInjuryStat/Event`按服务器定义显示；REQ-022、REQ-025 |
+| HW-12 | `0x0207`，表1-17，17–18 | 主控→对应机器人，发弹后 | 7 | `@0:uint8 bullet_type`1=17mm/2=42mm；`@1:uint8 shooter_number`1=17mm/2保留/3=42mm；`@2:uint8 launching_frequency`Hz；`@3:float initial_speed`m/s | 串；不把发射后数据当键鼠控制确认，MQTT动态可用字段按本身定义；REQ-020 |
+| HW-13 | `0x0208`，表1-18，18 | 服务器→己重装/步兵/哨兵，10Hz | 8 | `@0/2:uint16 projectile_allowance_17mm/42mm`；`@4:uint16 remaining_gold_coin`；`@6:uint16 projectile_allowance_fortress`，堡垒储备量与是否实际激活无关 | 串；MQTT自身允许量/全局累计量/经济分别按定义保留，不套uint16；REQ-018、REQ-020、REQ-030、REQ-033 |
+| HW-14 | `0x0209`，表1-19，18–20 | 服务器→己方装RFID机器人，3Hz | 6 | `@0:uint32 rfid_status`、`@4:uint16 rfid_status_2`；全部检测位见下节；赛外即使检测到卡也发0 | 串；不把RFID检测直接认定有效增益；MQTT模块在线与Buff权限独立；REQ-021、REQ-026、REQ-073 |
+| HW-15 | `0x020A`，表1-20，20–21 | 服务器→己方飞镖，3Hz | 6 | `@0:uint8 dart_launch_opening_status`1关/2开关中/0已开；`@1:uint8 reserved`；`@2:uint16 target_change_time`切目标时比赛剩余秒；`@4:uint16 latest_launch_cmd_time`上次确认发射时剩余秒 | 串；MQTT闸门枚举独立，禁止沿用这组开关数值；REQ-051 |
+| HW-16 | `0x020B`，表1-21，21–22 | 服务器→己方哨兵，1Hz | 40 | 10个float，`@0/4 heavyengineer_x/y`重装米坐标；`@8/12 reserved`；`@16/20 standard_3_x/y`；`@24/28 standard_4_x/y`；`@32/36 reserved`。原点为红补给附近围挡交点，X向蓝，Y向红停机坪 | 串；只用于理解硬件侧坐标，不为桌面合成未提供的位置；REQ-040、REQ-045、REQ-049 |
+| HW-17 | `0x020C`，表1-22，22 | 服务器→己方雷达，1Hz | 2 | `@0:uint16 mark_progress`：b0/2/3/5敌重装/3/4/哨兵易伤，进度≥100置1；b6/8/9/11己对应角色特殊标识，进度≥50置1；其余b1/4/7/10/12..15保留 | 串；无桌面直连标记进度功能；不把P-001扩大为雷达自主逻辑；REQ-044、REQ-073 |
+| HW-18 | `0x020D`，表1-23，22–24 | 服务器→己方哨兵，1Hz | 14 | `@0:uint32 sentry_info`；`@4:uint16 sentry_info_2`；`@6:uint64 sentry_info_3`，全部位域见下节 | 串；MQTT哨兵状态/指令结果独立闭环，不新增此硬件封装；REQ-049、REQ-050 |
+| HW-19 | `0x020E`，表1-24，24 | 服务器→己方雷达，1Hz | 8 | `@0:uint8 radar_info`：b0–1双倍易伤次数≤2，b2敌是否双倍易伤，b3–4己加密等级1..3，b5能否改密钥；`@1:uint8 radar_info_2`：b0是否有加固区域，b1–3剩余次数；`@2/4/6:uint16 fortify_center_x/y/radius`mm | 串；不由桌面直接控制雷达密钥/区域，也不从其它Topic猜此数据；REQ-044、REQ-073 |
+| HW-20 | `0x0301`，表1-25，24–26 | 机器人交互，经服务器转发；发送者触发，全cmd_id≤30Hz | 总表118；详细为6+x、x≤112 | `@0:uint16 data_cmd_id`；`@2:uint16 sender_id`；`@4:uint16 receiver_id`；`@6:uint8 user_data[x]`。9组子内容详下节 | 串；机器人绘图/互传不作为Qt直接A5入口；自定义界面自行绘制；REQ-006、REQ-045、REQ-063、REQ-073 |
+| HW-21 | `0x0303`，表1-35，34–35 | 选手端点击→服务器→己方选定机器人；云台≥0.5秒、半自动对应操作手≥3秒 | 12 | `@0/4:float target_position_x/y`米；`@8:uint8 cmd_keyboard`通用键值，无键0；`@9:uint8 target_robot_id`；`@10:uint16 cmd_source`。目标ID/坐标互斥，未用者为0；服务器触发后100ms间隔额外4次、共5次，另1Hz持续最近包 | 串；桌面执行`MapClickCmd`和`MapClickInfo`本身的引用约束；机器人侧重发不能变为桌面多次发布；REQ-042、REQ-043、REQ-045 |
+| HW-22 | `0x0305`，表1-36，36–37 | 雷达→服务器→己方所有选手端，≤5Hz | 48 | 24个uint16，12组xy厘米：敌[重装、保留、3、4、保留、哨兵]、己同序；每组4B。xy均0表示未发送；越界显示边缘 | 串；P-001指定的MQTT实际基准独立跟踪，不能直接按48B解析Protobuf；REQ-044、REQ-045 |
+| HW-23 | `0x0307`，表1-37，38 | 哨兵/半自动机器人→对应操作手选手端，≤1Hz | 105 | `@0:uint8 intention`1攻/2守/3移；`@1/3:uint16 start_position_x/y`dm；`@5:int8 delta_x[49]`dm；`@54:int8 delta_y[49]`dm；`@103:uint16 sender_id`。增量逐点累加，xy配对；左下原点，边界外夹边 | 串；`RobotPathPlanInfo`按MQTT字段/长度和触发定义单独实现，不套串口1Hz替代；REQ-041、REQ-045 |
+| HW-24 | `0x0308`，表1-38，38–39 | 己机器人→己任意选手端，≤3Hz | 34 | `@0:uint16 sender_id`；`@2:uint16 receiver_id`；`@4:uint8 user_data[30]`，UTF-16字符，注意大小端 | 串；第2章无独立该消息Topic，不擅加“官方自定义消息”或将其当`CustomByteBlock`内部格式；REQ-006、REQ-039、REQ-073 |
+| HW-25 | `0x0310`，表1-39，39 | 机器人→图传→对应操作手自定义终端，≤50Hz，无重传 | 总表/偏移300，示例data[x] | `@0:uint8 data[x]`自定义字节；MQTT对应`CustomByteBlock.data`≤300B | 字；MQTT基础通道待接收，现模拟器可手动旧发布，工业相机私有内容不自动纳入；REQ-039、REQ-063 |
+| HW-26 | `0x0311`，表1-40，39 | 对应操作手自定义终端→图传→己机器人，≤75Hz，无重传 | 总表/偏移60，示例data[x] | `@0:uint8 data[x]`自定义指令；MQTT对应`CustomControl.data`≤60B | 字；MQTT上行待实现，现模拟器旧接收仅解析打印；REQ-038、REQ-063 |
+| HW-27 | `0x0A01`，表1-41，40 | 信号源→雷达，10Hz | 24 | 2B坐标序列，无C类型声明：@0/2敌重装xy，@4/6保留，@8/10敌3xy，@12/14敌4xy，@16/18保留，@20/22敌哨兵xy；单位cm | 雷；不直连、不从无线包补造MQTT坐标；REQ-044、REQ-073 |
+| HW-28 | `0x0A02`，表1-42，40–41 | 信号源→雷达，10Hz | 12 | 每项2B，无C声明：@0敌重装血量，@2保留，@4敌3血量，@6敌4血量，@8保留，@10敌哨兵血量；未上场/罚下0 | 雷；桌面`GlobalUnitStatus`只按服务器实际MQTT内容展示；REQ-017、REQ-073 |
+| HW-29 | `0x0A03`，表1-43，41 | 信号源→雷达，10Hz | 10 | 每项2B，无C声明：@0敌重装允许量，@2敌3允许量，@4敌4允许量，@6保留，@8敌哨兵允许量；步兵/哨兵含堡垒储备 | 雷；不扩展P-002为对方弹量推定，也不冒充桌面完整敌情来源；REQ-017、REQ-073 |
+| HW-30 | `0x0A04`，表1-44，41–44 | 信号源→雷达，10Hz | 12 | @0/2各2B敌剩余/累计金币；@4/8各4B敌宏观状态位域，完整位定义索引见下节；本表无C声明 | 雷；不新增桌面对方经济/无线解密功能；REQ-018、REQ-024、REQ-073 |
+| HW-31 | `0x0A05`，表1-45，44–45 | 信号源→雷达，10Hz | 47 | 各角色7B增益组、姿态/主要状态及装甲区域共47B，全部偏移见下节；本表无C声明 | 雷；MQTT Buff只按实际目标与可见性显示，不用雷达无线推定；REQ-026、REQ-073 |
+| HW-32 | `0x0A06`，表1-46，46 | 信号源→雷达，10Hz | 6 | @0..5每字节ASCII字母或数字，为对方干扰波密钥；无C声明 | 雷；无桌面破解/发密钥路径，P-001不包含此业务；REQ-073 |
+
+### 3. 仍需明确保留的位域与硬件子结构
+
+#### 0x0101的两个32位字段（表1-9，PDF10–13）
+
+`event_data`：b0己补给；b1–2己小能量；b3–4己大能量；b5–7 R堡垒、b8–10 B堡垒、b11–13 R基地增益点、b14–16 B基地增益点；b17己制高点；b18–19 R中央高地、b20–21 B中央高地；b22–24 R前哨增益点、b25–27 B前哨增益点；b28–29 R前哨阵地控制、b30–31 B前哨阵地控制。堡垒/基地/前哨增益点0未激活/1己/2敌/3双方，己未控制对应阵地时发4；中央高地为0/1己/2敌，己未控制发3；小/大能量为0未/1已/2正在。
+
+`event_data_2`：b0–1 R基地控制、b2–3 B基地控制；b4–12敌飞镖上次命中时间秒0..420；b13–15敌飞镖上次目标（0默认，1 R前哨，2基地固定，3随机固定，4随机移动，5末端移动，6 B前哨）；b16–17 R高地激活、b18–19 R高地控制、b20–21 B高地激活、b22–23 B高地控制、b24–25中央控制区激活、b26–27中央控制区控制（后三组仅RMUL）。阵地控制0己完全/1己临时/2己未控制；RMUL控制0中立/1己/2敌，激活0无/1己/2敌/3双方。未定义剩余位不擅赋含义。
+
+#### 0x0209的RFID字段（表1-19，PDF18–20）
+
+各位1/0代表是否检测到卡，不能据检测位自己认定获得增益。`rfid_status`：b0己补给，b1己装配，b2/3 R/B基地，b4/5 R/B堡垒，b6/7 R/B中央高地，b8/9 R/B前哨，b10己制高点；b11/12/13 R高地/B高地/中央控制区（仅RMUL）；b14/15己中央高地下/上，b16/17敌中央高地下/上；b18/19己公路下/上，b20/21敌公路下/上；b22/23/24己公路侧隧道下/中/上；b25/26/27靠中央高地且靠己梯形高地低/中/高；b28/29/30远中央高地且距己梯形高地远/中/近。`rfid_status_2`：b0/1/2敌公路侧隧道下/中/上；b3/4/5靠中央高地且靠敌梯形高地低/中/高；b6/7/8远中央高地且距敌梯形高地远/中/近。其他位没有赋义；赛外全0。
+
+#### 0x020D哨兵同步（表1-23，PDF22–24）
+
+`sentry_info`：b0–10非远程成功兑换允许量；b11–14远程兑换允许量次数；b15–18远程回血次数；b19能免费复活；b20能立即复活；b21–30立即复活金币；b31保留。`sentry_info_2`：b0脱战；b1–11队伍17mm剩余可兑换数；b12–13姿态1攻/2守/3移；b14己机关可进入激活；b15强化姿态。`sentry_info_3`：b0–7/8–15/16–23分别进攻/防御/移动姿态弱化前剩余秒；b24–31保留；b32–39/40–47/48–55分别强化进攻/防御/移动剩余秒；b56–63保留。
+
+#### 0x0301交互头与9组开放子内容（表1-25～1-34，PDF24–34）
+
+每组外层均为`data_cmd_id/sender_id/receiver_id`各uint16加内容；发送者须匹配自身ID，只限己方且符合多机接收者规则。除雷达外只能发往对应选手端，雷达可发己任意选手端。整包≤127B，内容≤112B，全0x0301共用≤30Hz，不是每子内容各30Hz。每1000ms机器人接收基础额度：重装/步兵/空中/飞镖3720B，雷达/哨兵5120B，再乘`1−己基地已损血量/20000`并四舍五入。桌面不承担硬件侧带宽调度。
+
+| 子内容ID | 内容长度B | 全字段与原文定位 | 当前桌面/模拟器处置 |
+| --- | --- | --- | --- |
+| `0x0200–0x02FF` | x≤112 | 表1-25，PDF25：机器人之间自定义`user_data[x]`，官方未定义内部私有业务 | 硬件机器人互传；不将私有业务纳入官方桌面功能；REQ-073 |
+| `0x0100` | 2 | 表1-26，PDF26：`@0:uint8 delete_type`0空/1删图层/2删全部；`@1:uint8 layer`0..9 | 官方选手端图层管理，Qt自行绘制UI；不新增串口绘图接收器；REQ-045、REQ-073 |
+| `0x0101` | 15 | 表1-27/28，PDF26–29：`figure_name[3]`；@3配置1 uint32位域`operate_tpye:3/figure_tpye:3/layer:4/color:4/details_a:9/details_b:9`；@7配置2 `width:10/start_x:11/start_y:11`；@11配置3 `details_c:10/details_d:11/details_e:11`；图形细节见下一段 | 同上；不得把官方图形命令数量等同QML需求数；REQ-045、REQ-073 |
+| `0x0102` | 30 | 表1-29，PDF29：`interaction_figure_t[2]`，偏移0、15分别完整15B图形 | 同上；REQ-045、REQ-073 |
+| `0x0103` | 75 | 表1-30，PDF29：`interaction_figure_t[5]`，偏移0/15/30/45/60 | 同上；REQ-045、REQ-073 |
+| `0x0104` | 105 | 表1-31，PDF29–30：`interaction_figure_t[7]`，偏移0/15/30/45/60/75/90 | 同上；REQ-045、REQ-073 |
+| `0x0110` | 45 | 表1-32，PDF30：15B字符图形配置+30B字符；表格偏移0/2/4含外层6B交互头，配置从6、文字从21；C示例`graphic_data_struct_t grapic_data_struct; uint8_t data[30]`只示内容，未重新定义该类型 | 不把包含头的表格偏移误当内容51B，也不补造缺失C类型；REQ-006、REQ-073 |
+| `0x0120` | 4 | 表1-33，PDF30–32：`uint32 sentry_cmd`，b0确认复活、b1确认立即复活、b2–12累计兑换允许量、b13–16远程兑换允许量请求次数、b17–20远程回血请求次数、b21–23姿态1攻/2守/3移/4强化攻/5强化守/6强化移（默认3）、b24确认机关进入激活、b25–31保留 | 机器人自主指令；桌面使用MQTT哨兵/通用命令单独定义，不复用此位域；REQ-049、REQ-050、REQ-073 |
+| `0x0121` | 13 | 表1-34，PDF32–34：`@0:uint8 radar_cmd`；`@1:uint8 password_cmd`；`@2..7:uint8 password_1..6`；`@8:uint8 armor_fortify_cmd`；`@9/11:uint16 fortify_center_x/y`mm | 雷达自主决策，当前桌面不直连、不新增私有密钥/加固命令；REQ-044、REQ-073 |
+
+图形细节：操作0空/1增/2改/3删；图形类型0线/1矩形/2圆/3椭圆/4圆弧/5浮点/6整数/7字符，图层0..9，颜色0己方色/1黄/2绿/3橙/4紫红/5粉/6青/7黑/8白。直线/矩形的details_d/e是终点或对角顶点xy；圆details_c半径；椭圆details_d/e半轴；圆弧details_a/b起止角、d/e半轴；浮点/整数details_a字体大小，c/d/e组成32位整数（浮点显示值除1000）；字符details_a字体大小、b字符长度。坐标左下(0,0)到右上(1920,1080)；角度0°向12点、顺时针。表格未使用项不擅赋义。
+
+`0x0120`累计值须单调递增；远程请求次数每次只能+1；服务器从低位到高位处理，遇不能处理即停止后续。此处理顺序属于机器人自主决策通道，不可推导MQTT `SentryCtrlCommand`重复发送规则。`0x0121 radar_cmd/armor_fortify_cmd`同样单调且逐次+1；双倍易伤已有生效时下次排队。改密钥仅开局/加密等级提升时；验证密钥每次更新后10秒内再次更新无效。密钥字段的文字将1..7共7字节称ASCII字母数字，又说byte1类型1/2，保留原表这种表达，不擅定byte1是二进制1/2还是ASCII `'1'/'2'`。当前接口不在桌面直连范围，此疑问不阻塞MQTT及标准视频任务；若以后增加雷达硬件工具，先确认该编码。
+
+#### 0x0A04宏观字段（表1-44，PDF41–44）
+
+@4四字节：b0敌补给，b1–3 R堡垒、b4–6 B堡垒、b7–9 R基地增益、b10–12 B基地增益，b13敌制高点，b14–15 R中央高地、b16–17 B中央高地，b18–20 R前哨增益、b21–23 B前哨增益。相对于敌方的激活值为0未/1敌激活/2己激活/3双方；对应阵地不由敌控制时发4，中央高地无双方值且不控制时发3。
+
+@8四字节：b0敌中央高地上方、b1己中央高地上方、b2敌公路上方、b3己公路上方；b4/5/6敌公路侧隧道下/中/上；b7/8/9靠中央高地且靠敌梯形高地低/中/高；b10/11/12远中央高地且距敌梯形高地远/中/近；b13/14/15己公路侧隧道下/中/上；b16/17/18靠中央高地且靠己梯形高地低/中/高；b19/20/21远中央高地且距己梯形高地远/中/近；上述均0未检测敌机器人/1检测到敌机器人。b22–23 R前哨控制、b24–25 B前哨控制、b26–27 R基地控制、b28–29 B基地控制：0敌完全/1敌临时/2敌未控制。未定义剩余位不补造。
+
+#### 0x0A05全部47B字段（表1-45，PDF44–45）
+
+无C声明，以下仅记录表列大小，不自动转成有符号或无符号类型：
+
+| 偏移 | 大小B | 含义 |
+| --- | --- | --- |
+| 0/1/3/4/5 | 1/2/1/1/2 | 敌重装回血%/每秒热量冷却增加值/防御%/负防御%/攻击% |
+| 7/8/10/11/12 | 1/2/1/1/2 | 对应保留组 |
+| 14/15/17/18/19 | 1/2/1/1/2 | 敌3步兵同一组5项增益 |
+| 21/22/24/25/26 | 1/2/1/1/2 | 敌4步兵同一组5项增益 |
+| 28/29/31/32/33 | 1/2/1/1/2 | 敌哨兵同一组5项增益 |
+| 35 | 1 | 敌哨兵姿态1攻/2守/3移/4强化攻/5强化守/6强化移 |
+| 36/37/38/39/40 | 各1 | 敌重装主要状态/保留/敌3主要状态/敌4主要状态/敌哨兵主要状态；0活/1亡/2无敌不虚弱/3无敌虚弱，异常离线不影响本字段判断 |
+| 41/43/45 | 各2 | 敌自定义装甲当前圆形加固圆心x/y/半径mm，检测面左下原点；半径0暂无情报 |
+
+### 4. 硬件清点的覆盖检查与未决边界
+
+- 表1-5命令码32个，本节HW-01..HW-32一一对应，无缺失、无重复；0x0301全部9组开放子内容均已给出处置（其中一组是0x0200–0x02FF范围），并未计成256个独立桌面功能。
+- 桌面“直接A5串口收发/无线接收”为明确不适用，不属于已完成。与桌面有关的MQTT/地图/字节语义均有REQ链接，硬件专属内容归REQ-073边界审查，不创建重复开发任务。
+- 原文重复`reserved` C标识符、`graphic_data_struct_t`示例类型未在该处定义，都不需要桌面自行修复原文。硬件不同枚举（飞镖开关、判罚等）与MQTT不同，属于不同接口，不记协议冲突。
+- `0x0121`的密钥指令ASCII描述疑问已统一登记P-008，来源表1-34、PDF32–34；影响仅未来硬件雷达自主密钥通道，当前不直连，待编码依据，不沿用P-001解决。
+- 本节只完成审计和处置规划，未运行硬件帧测试、串口/雷达设备或网络端到端验证。

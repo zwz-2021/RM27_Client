@@ -1,0 +1,241 @@
+# 当前项目完成情况与缺口
+
+审计日期：2026-11-02。范围为当前工作树，包含任务开始前已有的未提交修改。本次重新核对程序、脚本、配置、测试源码和既有检查日志，修订规划文档；没有修改功能代码、构建配置、PDF，也没有重新启动客户端、模拟器或 Broker。需求 ID 的统一索引见 [需求说明书](02_Requirements.md)，逐消息契约见 [协议覆盖矩阵](03_Protocol_Coverage.md)。
+
+后续实做和检查记录见 [13 进度记录](13_Progress_Log.md)。本页的实现判断保留为 2026-11-02 审计基线。
+
+## 1. 结论与判断口径
+
+当前项目是“能够独立启动的 Qt Quick 骨架，加上五类 RM27 基础消息的离线编解码，以及独立运行的基础数据模拟器”。它还不是能够接入模拟器比赛数据的操作客户端。
+
+核心证据是 [ClientApplication.cpp](../../apps/client/ClientApplication.cpp) 的 `ClientApplication::run()`：`simulation` 创建 `MockDataSource`，其他模式创建 `UnavailableDataSource`。没有创建 MQTT 数据源。虽然可执行文件已经链接 `rm27_protocol`，`ClientSession` 与 QML 没有消费 `BasicMessage`，当前 `ClientSnapshot` 只有演示心跳序号和运行秒数。
+
+本报告使用以下状态，不能互相替代：
+
+| 状态 | 含义 |
+| --- | --- |
+| 已完成（限定范围） | 所述小范围有实际代码及可追溯检查证据，不表示整项业务或官方接口完成 |
+| 部分完成 | 只有契约、离线处理、模拟器一侧或部分字段，缺少最终数据或操作闭环 |
+| 已实现未验证 | 有可执行路径，但本轮或现有记录没有对应运行证据 |
+| 未实现 | 当前产品链路不存在，历史参考代码不能补足此状态 |
+| 占位 | 只有接口、目录说明或明确报“未接入”的替代实现 |
+
+汇总数量必须按统一需求粒度统计，不能把本报告的模块行数、32 个消息数或模拟器控件数当作独立功能数。统一统计以 [需求说明书](02_Requirements.md) 和 [测试验收](08_Test_and_Acceptance.md) 为准。
+
+## 2. 客户端逐层审计
+
+| 功能 / 模块                       | 当前状态            | 阅读到的代码证据                                                                                                                  | 还需要完成                                                      |
+| ----------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Windows / C++17 / Qt Quick 启动 | 已完成（开发骨架）       | 根 `CMakeLists.txt` 要求 Qt 6.8+ Core/Gui/Qml/Quick/QuickControls2；`apps/client/main.cpp`、`ClientApplication::run()` 负责入口与组合 | MQTT、Network、视频依赖需按后续任务接入；干净机器发行另验收                        |
+| 配置读取与错误显示                     | 已完成（现有字段）       | `libs/config/AppConfig.cpp::loadConfig()` 严格检查根节点/未知字段、模式、窗口尺寸、模拟间隔；配置失败不启动数据源                                            | Broker、机器人身份、超时、网卡/视频参数、正式/外部模拟环境配置尚无字段；不能直接向现有 JSON 填这些字段 |
+| 运行来源                          | 部分完成            | `ClientApplication::run()`、`MockDataSource::start/publishSnapshot()`、`UnavailableDataSource::start()`；后者明确报告正式通信未接入       | 将内置预览、外部模拟器和官方接入区分；外部模拟器和官方接口共用真实通信实现                      |
+| 启停与退出                         | 已完成（同步心跳范围）     | `ClientSession::start/stop/clearSnapshot()`，停止前关闭入口，清空快照；aboutToQuit 停止会话                                                 | 网络异步回调需要会话代号/取消，现有 `active_` 不能单独保证重新连接后旧回调不污染新会话          |
+| JSONL 日志                      | 已完成（启动/状态/退出）   | `JsonlLogger::open/write()` 写时间、级别、事件、详情，检查创建目录、写入和 flush 结果；界面显示路径                                                       | 没有原始报文录制、轮转/容量控制、协议错误计数、命令与视频指标；逐条同步 flush 不适合高频包          |
+| 五类基础 DTO 与编码                  | 已完成（离线范围）       | `libs/domain/BasicData.h`，`libs/protocol/BasicCodec.cpp::fromWire/toWire/decode/encode`，共享 `rm27_base.proto`              | 继续保留 optional 存在性和未知值；不把离线解析当作界面显示                         |
+| 基础合法性检查                       | 部分完成            | `validate()` 检查血量数组非空时 8 项、P-002 弹量数组非空时 6 项、热量/射速有限数；`decode()` 有本地 1 MiB 防护上限、错误 topic/截断错误                             | 其余消息、枚举语义、角色/阶段、单位、长度、频率和状态合并规则待补；1 MiB 是工程防护值，不是官方报文固定长度  |
+| 身份和类型                         | 已完成（P-003 离线范围） | `identifyRobot()`、`robotRoleFromStaticType()`、`RobotStaticData::role()`：有效 ID 优先，类型后备，2/102 保留；未知保留未知                     | 真正连接时身份授权、操作端、控制来源、身份切换需独立实现和设备验证；不能凭下拉 ID 获得操作权限          |
+| MQTT 连接/订阅/收发                 | 未实现             | transport 的构建目标仅含 Mock/Unavailable；应用入口无 MQTT 类；`IDataSource` 只有快照/连接信号                                                   | 库集成、连接订阅确认、逐 topic 接收、发布、重连重订阅、超时、健康度、退出清理                 |
+| 权威赛事状态与数据时效                   | 未实现             | `ClientSnapshot.h` 只含 sequence/elapsedSeconds，`ClientSession` 整体替换演示快照                                                    | 按 topic/实体合并、缺失与零值区分、时间戳/新鲜度、红蓝/己敌、换局和身份切换清理               |
+| 赛事操作与反馈                       | 未实现             | `ClientViewModel` 仅暴露 start/stop；没有命令入口                                                                                   | 参数与权限校验、限频、防连点、待同步/成功/失败/超时未知态，不把 PUBACK 当业务成功             |
+| 键鼠输入                          | 未实现             | 当前 QML 没有比赛输入采集或发送路径                                                                                                      | 协议位掩码、控制源、发送调度、失焦/断线清键、鼠标相对位移                              |
+| UDP 图传 / HEVC                 | 占位              | `libs/video/README.md` 只有边界说明，无 CMake target、socket、组帧、解码器或视频展示组件                                                         | UDP 收包/校验/重组、有界缓存、HEVC 解码、Qt Quick 展示、断流/关键帧恢复、性能指标        |
+| 工作台与诊断 UI                     | 已完成（心跳骨架）       | `Main.qml` 只有工作台/运行信息两页；`OverviewPage.qml` 是来源、启停、心跳和业务占位卡；`DiagnosticsPage.qml` 显示模式和日志路径                                | 基础数据显示、视频、模块自检、各角色操作、地图、事件/增益/判罚及限制态                       |
+| 配置持久化 / 数据录制 / 回放             | 未实现             | `loadConfig()` 只有读取，无写回；日志不含原始消息；配置解析明确提示回放未实现                                                                            | 连接配置可按项目目标实现；报文留证/离线重现先做；面向用户的完整回放属于可选增强，不阻塞核心接入           |
+| 发布打包                          | 未实现             | 构建和 run 脚本从 CMakeCache 把开发机 Qt/MinGW 加入 PATH，没有安装/部署目标或独立发行脚本                                                             | Release、Qt/QML 插件、通信/解码运行库、许可证、默认相对/用户路径、无开发环境 Windows 验收  |
+
+目前 `configs/*.example.json` 的日志目录包含开发机绝对路径，属于部署缺口；`loadConfig()` 已支持配置相对目录，不需要为此改动业务协议。依赖版本不作联网推荐，本轮仅记录源码中已固定的选择：`cmake/Protobuf.cmake` 使用 Protobuf v29.3 / Abseil 20240722.0 源码及 SHA256，与客户端编译器一起编译；Python 依赖声明 `protobuf>=6.33.2,<7`，应通过现有生成/运行时检查保持兼容，不能仅凭主版本号推断可用。
+
+## 3. 五类基础消息的真实完成边界
+
+| 消息 | C++ 当前处理 | 模拟器当前实际输出 | 尚未完成 |
+| --- | --- | --- | --- |
+| GameStatus | 10 个字段编解码，保留 signed 秒数、optional 和未知枚举数值 | `base_pb.GameStatus`；5 Hz；非结算结果为 255，结算有权威值才发送 | 网络进入领域状态/QML、暂停与跨局时效、完整赛事接入 |
+| GlobalUnitStatus | 16 字段 DTO；血量/弹量数组长度检查，身份映射辅助函数 | 1 Hz；己/敌八项血量；固定 R/B 前哨；按 P-002 六槽己方弹量 | `base_status/base_shield/enemy_*状态/盾/outpost_*_status/total_damage_*/total_CP_*` 本步未发送；旧网页能设这些值不表示出现在 RM27 基础报文中 |
+| GlobalLogisticsStatus | 4 字段，累计经济 uint64 不丢精度 | 1 Hz；己方剩余/累计经济、科技/加密等级；网页累计值按字符串保精度 | 客户端接收/显示、与指令和重装状态的业务关联 |
+| RobotStaticStatus | 14 字段；P-003 类型解释与原始存在性保留 | 1 Hz；12 个基础机器人可切换；第 5 字段按用户指定约定实际发送 | 官方设备类型值仍未验证；性能选择命令与同步未迁移 |
+| RobotDynamicStatus | 13 字段，float 有限性等 | 10 Hz；#4 `reserved=0`，独立允许发弹量/累计发弹量输入，当前机器人跟随选择 | 网络状态/界面、远程补给权限与命令闭环；不能把 reserved 还原成旧 chassis_energy |
+
+五类 C++ 编解码有双向检查，但并不是所有字段在模拟器当前基础周期里都会发送，尤其是 GlobalUnitStatus 尚有明确留到后续的 optional 字段。这是阶段范围限制，应在补齐比赛总览时开发，不能在规划中写成全消息业务已完成。
+
+## 4. 模拟器与网页审计
+
+### 4.1 独立运行及生命周期
+
+`simulator/server/main.py::main()` 是独立入口，`--check` 仅检查依赖和资源，`--probe-mqtt` 进行 MQTT CONNECT/CONNACK。`app.py::create_app/lifespan()` 组装 StateManager、MQTT、可选旧 UDP、两路视频和演示引擎，并在退出时取消异步任务、停止线程和子进程。没有导入或等待 Qt 客户端。
+
+`simulator/scripts/start.ps1` 支持 Install、BrokerOnly、普通模拟器、可选视频和旧 UDP；端口占用先检查。`common.ps1` 通过归属记录检查 PID/启动时间/命令、HTTP instanceId 和 Docker 标签等；`stop.ps1` 只处理本脚本取得停止权的资源。复用已有 Broker 不取得停止权。后续联调应继续使用独立临时端口，不能停止用户原有 8000 服务来“方便测试”。
+
+`/api/health` 返回 `rm27-base-v1.0.0+legacy-tools` 和五类 `basicTopics`，不是整套 RM27 兼容声明。MQTT 首次连接失败时控制台仍可运行，但 `lifespan()` 明确输出需准备 Broker 后重启；当前不是经过验证的“Broker 初始不可用仍自动恢复全部发送循环”实现。
+
+### 4.2 协议覆盖现状
+
+完整 32 消息矩阵及字段依据见 [03](03_Protocol_Coverage.md)。本节只记录读到的实际路径。
+
+| 当前状态 | 消息 / 路径 | 不能据此声称 |
+| --- | --- | --- |
+| RM27 周期发布的五类 | `_publish_loop_5hz/1hz/10hz()`：GameStatus、GlobalUnitStatus、GlobalLogisticsStatus、RobotStaticStatus、RobotDynamicStatus | 不表示 Qt 已接收，或其他 27 类已迁移 |
+| 旧消息手动发布 / 保留工具 | app 的路径/模块/事件/增益/判罚/自定义字节/雷达等处理调用旧 `pb`；性能、哨兵、飞镖、能量机关有旧同步函数 | 方法存在和旧报文发出不表示字段、枚举、频率、角色与 RM27 一致 |
+| 旧发布方法存在但当前周期不调用 | GlobalSpecialMechanism、RobotInjuryStat、RobotPosition、RobotRespawnStatus 等可找到函数；新周期刻意只留五类 | 不能把旧函数或旧状态字典算作按官方频率实际覆盖 |
+| 当前 MapClickInfo 下行 | 本轮在服务器调用路径未找到正式 RM27 MapClickInfo 的生成链路 | 旧 MapClickInfoNotify 上行日志不等于新的地图下行/上行闭环 |
+| 当前上行订阅 | KeyboardMouseControl、CustomControl、AssemblyCommand、RobotPerformanceSelectionCommand、CommonCommand、RuneActivateCommand、DartCommand、SentryCtrlCommand；另订阅旧 MapClickInfoNotify、HeroDeployModeEventCommand、AirSupportCommand | 正式 RM27 MapClickCmd 未接入；旧新增 topic 不应继续对外冒充本赛季接口 |
+
+`_on_message()` 的当前业务深度：
+
+| 操作 | 当前处理 | 迁移缺口 |
+| --- | --- | --- |
+| 键鼠、CustomControl、旧 MapClickInfoNotify | Protobuf 解析后打印，直接返回 | 缺状态观测、字段/长度/频率校验与测试；无控制执行闭环 |
+| AssemblyCommand | 打印 operation/difficulty 后返回 | 没有驱动装配状态机，也没有成功/失败/取消闭环 |
+| RobotPerformanceSelectionCommand | 写旧同步状态并立即发布旧 sync | 需 RM27 选项/时段/机器人权限和权威静态字段一致性检查 |
+| CommonCommand | 仅实现类型3免费复活、类型4立即复活；param 按数组索引或 robot_id 解析 | 尚未完成第2步优先的兑换允许发弹量及经济变化；旧索引解释不能直接照搬为RM27业务语义 |
+| RuneActivateCommand / DartCommand | 调旧 StateManager 并发布旧状态 | 需新枚举、规则、费用、阶段、角色限制与异常反馈 |
+| SentryCtrlCommand | `apply_sentry_command()` → 结果队列/即时结果 → 状态 | 有旧闭环形状，但尚未迁移和验证，不能据此给 RM27 打通过标记 |
+
+上行回调仍用旧 `robomaster_pb2`；不能因为新基础下行用了 `rm27_base_pb2` 就认定两边使用一套完整 2027 契约。迁移时以统一官方矩阵逐项扩展共享定义，保留 P-001/002/003 的限定用户约定。
+
+### 4.3 网页实际功能与旧行为隔离
+
+`static/index.html` 顶部基础区域有阶段/时间/暂停、12 台机器人血量/热量/全局累计发弹量、当前机器人选择、静态/动态表单、经济等输入。`app.js::sendCommand()` 通过 Socket.IO `referee_command` 发送，处理服务端输入失败 ACK；静态类型名称随 ID 显示，uint64 经济保持十进制字符串。`state_manager.py::set_basic_robot_values/set_robot_static_status/set_robot_dynamic_status/set_logistics_protocol_state` 在落状态前校验，相关测试检查错误输入不部分写入。
+
+模块表单仍是旧 `power_manager/rfid/.../laser_detection_module`；`_publish_robot_module_status()` 使用旧 `pb`，不是本步 RM27 合规输出。网页还有地图拖拽、路径绘制、赛事演示、视频、判罚、增益、旧英雄部署/狙击和空中支援等工具，已有“以下保留旧版演示和开发工具”的说明。迁移模块状态、自检和权限仍按现有通俗路线第4步第一组执行，不应因为输入区靠前就误判已经更新。
+
+还需区分网页保存与 MQTT 发布：`app.py:449/455/493/500` 对应机制、伤害统计、性能同步、哨兵状态的分支只调用状态设置器，没有直接发布；当前新周期循环也不调用它们的旧发布器。因此这些面板即使在网页更新成功，也不能记成“消息已发出”。路径 `app.py:470`、模块 `:489`、哨兵结果 `:507` 则有显式旧发布调用；性能/哨兵等部分旧 MQTT 上行还会即时发布旧同步。后续逐功能验收必须捕获真实负载，不能只看按钮文字或网页刷新。
+
+网页只将当前机器人选择写入 `localStorage`（`app.js:561/805`）；服务端状态主要在内存中，2 Hz 的 `update` 是界面同步，不是场景落盘。静态/动态表单用脏标记保留未提交编辑，基础数组编辑使用合并函数防止周期更新覆盖；这些已存在的编辑保护应保留。客户端自身目前只有配置读取，没有这套网页持久化或编辑逻辑。
+
+`MatchSimulationEngine` 支持固定 seed、可注入 clock、快速/完整演示、暂停/倍速、手工改位置暂停等，能帮助重复触发场景；`EVENT_TIMELINE` 仍有英雄狙击/旧空中支援事件。它不是已符合 RM27 的完整经济/战斗裁判模型，不能拿一次演示跑完代替规则验收。
+
+### 4.4 UDP 与视频
+
+| 链路 | 代码事实 | 后续处理 |
+| --- | --- | --- |
+| 旧 UDP 状态/控制 | `protocol.py` 标注 RM26 V1.2.0，`UDPSender::_send_packet()` 多数为 CmdID+Length 的简化帧，结果/警告又用 CRC 帧；`UDPReceiver` 收 CRC 帧并日志；默认均不开 | 只作历史调试工具，不能作为 RM27 MQTT 或标准视频接入验收；避免将此私有格式当官方扩展 |
+| Web HEVC | `VideoStreamer` 用 FFmpeg/libx265，Annex-B 提取访问单元、`!HHI` 大端8字节头、16位帧号回绕；整 UDP 负载最大1464 | 后续按协议整包上限修正；必须检查实际包长，而不是注释“遵循官方协议” |
+| 独立 HEVC 工具 | `tools/video_sender.py` 用1400字节数据片再加8字节头，整包1408；`frame_id += 1` 后没有16位回绕 | 与网页发送器行为不一致，需同时修正；运行到65536时打包 `H` 会失败，须边界测试 |
+| 码流切帧 | `HevcAnnexBFrameExtractor` 按 NAL/first_slice 提取访问单元，避免任意 stdout 块当完整帧 | 有真实码流的 FFmpeg/解码验证、丢片重同步及长时间测试仍需开展 |
+| 工业相机 | `IndustrialCameraStreamer` 把 H.264片+1字节packetId 放 CustomByteBlock，旧客户端语义 | 属旧私有业务，不是标准 UDP 图传；本次需求不自动纳入此私有协议 |
+
+图传整包限制以 [03](03_Protocol_Coverage.md) 的本地官方原文为准。上述是可定位的现有代码缺口，不是新增协议歧义。真实设备的分片起点、码流封装、恢复和性能另列“未验证”。
+
+### 4.5 故障注入与可测试性
+
+已有基础输入可以设负数弹量、零、极值；离线测试还会构造缺字段和错误输入，它们属于报文/输入边界测试，不能说成网页已有任意畸形报文注入器。源码没有通用的 UDP 丢包/乱序/重复/延迟配置，也没有 MQTT 静默/截断/旧会话回调/重连消费命令重放的系统故障场景。停止组件、切换端口和停止 Broker 可人工构造部分故障，尚未形成统一可重复的自动场景。
+
+最先需要的模拟器补齐是：兑换命令→经济/允许发弹量权威同步、模块状态逐项输入/真实发布、正确视频分片、MapClickCmd/MapClickInfo 回路以及按角色批次的新状态与命令。不要先扩建完整物理仿真或对战 AI。
+
+## 5. 测试、构建与部署证据
+
+### 5.1 本轮实际做了什么
+
+本轮运行的是只读文件清单、源码/配置/脚本阅读和 `rg` 搜索，核对现有构建产物及日志。没有重新构建、跑 CTest/Python 功能检查、启动 GUI、打开网页、推视频、连接官方设备或跑 Release。下列结果是已存在记录，不冒充本轮复验。
+
+| 证据 | 实际能支持的结论 | 不能支持的结论 |
+| --- | --- | --- |
+| `build/p003-client-build.log` 尾部链接成功；[问题记录](09_Open_Questions.md) P-003 | 既有 Debug 构建包含协议 target 和 RM27_Client | 本轮重建通过、干净机器 Release 可用 |
+| `build/local-debug/Testing/Temporary/LastTest.log` | 既有 `protocol_basic` 1/1 通过，输出 Protocol basic checks passed | MQTT/视频/GUI/完整业务通过 |
+| `build/p003-basic-check.log` | 五类全字段/缺失/显式零双向、P-003角色/红蓝优先/未知、12台实际编码交C++、10项模拟器/控制台检查记录通过 | 官方编码表已补齐或实车通过 |
+| [问题记录](09_Open_Questions.md)、[P-003 历史核对](history/p003-reference.md) | 既有独立临时Broker基础负载和真实浏览器类型显示/表单检查记录 | Qt建立MQTT连接、当前全部旧面板合规 |
+| `tests/check_basic_data.py` 与 `BasicCodecCheck.cpp` | 独立转录的五类字段号/类型契约、固定字节样本、Python/C++相互校验入口确实存在 | 32消息全部覆盖；共享schema互通不等于原文逐项符合 |
+| `simulator/tools/check_base_data.py` | 10项测试覆盖红蓝血量顺序、P-002六槽、P-00312台、输入原子性/精度、周期只发五类、异步网页指令 | 网络故障、视频解码、正式UI和所有角色闭环 |
+| `simulator/tools/smoke_test.py` | 可用临时AMQTT、HTTP、Socket.IO、基础MQTT负载和旧UDP生命周期冒烟入口 | Docker实测、Qt端到端和真实HEVC播放 |
+| `simulator/tools/release/*` | 生成代码漂移/包路径/运行时检查与对应工具测试存在 | 角色契约符合2027；运行时自检不等于官方报文验收 |
+
+当前没有 CI 工作流，也没有客户端会话/配置/QML交互/输入/视频/故障恢复/发行包的自动验收套件。现有基础契约检查应保留，后续按垂直闭环加必要测试，不为文档变更扩写无意义测试。
+
+### 5.2 保留的真实命令入口
+
+以下均在仓库根目录使用现有脚本；它们是后续复验方法，本轮未执行：
+
+```powershell
+# 构建与基础离线检查
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Configuration Debug
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-basic-data.ps1 -SkipBuild
+
+# 当前客户端：只会看到内置心跳；official模式明确提示尚未接入
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run.ps1 -Configuration Debug -Mode simulation -SkipBuild
+
+# 模拟器独立运行，安装仅在缺依赖时执行
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\simulator\scripts\start.ps1 -Install
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\simulator\scripts\start.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\simulator\scripts\check.ps1 -Runtime
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\simulator\scripts\stop.ps1
+```
+
+首次本地构建需要按 [构建与启动说明](12_Build_and_Run.md) 准备 `CMakeUserPresets.json` 和真实Qt/MinGW/CMake/Ninja路径；不应覆盖用户已有配置。`check.ps1` 的离线返回0并不保证 Docker daemon 或 FFmpeg 可用，脚本对其缺失仅输出提示；视频要单独验证，不能将其绿色退出解释为视频通过。
+
+## 6. 架构与实施顺序的缺口
+
+1. 保留 `apps/ + libs/` 的现有分层。协议处理不应放 QML；transport 接真实网络，application 管用例和会话，domain 管权威状态，presentation 投影 UI。模拟器继续独立。
+2. 当前 `IDataSource` 的单一演示快照接口不足以承载所有topic和发布；下一步应扩展明确消息/命令边界，避免把解码、命令、地图、视频全部塞进 `ClientSession`。
+3. 先做MQTT依赖与五类接收，再做协议明确的单项兑换闭环；不要先铺完整QML。现有五类codec、测试、脚本和P-003成果直接复用。
+4. 视频阶段同时修两个发送入口，客户端从收包到真实播放验收；收到UDP包数不算播放完成。带宽、时延、内存、线程和退出的约束从此阶段就执行。
+5. 按原通俗路线第4步先迁移 RobotModuleStatus 与自检，然后逐组完成通用操作、键鼠、全局/事件、地图、哨兵、重装、能量机关/飞镖及自定义通道。每组同时更新客户端、模拟器和网页。
+6. “源码已做”“模拟器通过”“真实设备通过”保留独立证据。角色覆盖和设备条件不齐时，按明确范围发布开发版本，不能标成完整比赛交付。
+
+并发状态还需专项修整：`state_manager.py:3005 get_state()` 虽在锁内组装返回值，但 `globalUnitStatus` 使用浅复制，内部血量、弹量等列表仍与后台状态共享；MQTT 线程得到字典后再遍历列表，不能据此保证跨字段、跨数组的快照一致性。此为源码可见风险，本轮没有复现竞态，后续应采用独立快照并覆盖并发切机器人/改血量测试。旧 `_determine_winner()` 的判胜顺序与数组切片也只保留为旧模拟行为，须按固定 RM27 规则重新审查；客户端应显示权威 `GameStatus` 结果，不复制模拟器判胜算法。
+
+## 7. 与现有项目文档的衔接
+
+通俗路线六步、每次只做一个小任务、用户决定偏好与设备条件、Codex负责查原文/技术选择/能自行运行的检查，是本次新计划继续采用的工作方法。技术备查中关于状态有效性、命令防重放、会话隔离、有界缓存、限制机制和独立发行的细项也应保留到新任务/验收表，不能为了让新路线更短而丢失。
+
+[原架构说明](history/originals-2026-11-02/docs-root/architecture.md.txt) 的协议和测试描述早于五类编解码和 CTest/Python 检查。后续使用 [11 架构](11_Architecture.md) 查看模块职责，用 [12 启动指南](12_Build_and_Run.md) 查找构建运行命令。
+
+本轮审计时，P-001 雷达待实施，P-002 指定映射已有离线检查，P-003 已完成第 1 步修改，官方设备尚未验证。原始说明、检查记录和后续处理统一在 [09 问题记录](09_Open_Questions.md) 追踪。
+
+## 8. 阅读范围与限制
+
+已阅读当前自有 C++/头文件、QML各页面/组件、CMake/预设/示例配置、构建/运行/基础检查脚本，基础schema/codec/测试，模拟器入口、应用装配和路由/事件、MQTT循环及处理器/发布器、StateManager重点状态更新和锁边界、UDP协议/收发、两种视频发送和HEVC提取器、赛事演示引擎、网页基础表单/状态同步/地图变换/发送方法，模拟器启动停止公共脚本和包依赖/生成检查工具，并核对前述既有日志。
+
+长文件采用函数清单加功能相关段落审读，未逐行证明整个 `StateManager`、网页 `app.js/style.css`、工业相机编码器探测分支或所有生成工具测试分支都正确；第三方压缩Vue/Socket.IO、生成的pb2、下载的依赖源码、二进制/图片未逐行审计。未执行旧业务、真实图传、性能负载、正式接口和目标电脑检查。这些边界不影响“当前Qt无网络和视频接入”的确定结论，但相应旧业务只能记待迁移/未验证，不能宣称已完成全面运行验证。
+
+## 9. 本次复核的定位索引
+
+以下行号来自 2026-11-02 当前工作树，后续修改后以函数名重新定位。表格是检查入口，结论与上文限定范围一致。
+
+| 检查对象 | 文件与定位 | 本次确认的事实 |
+| --- | --- | --- |
+| 实际数据源组合 | `apps/client/ClientApplication.cpp:50`，`libs/transport/CMakeLists.txt:1` | 只有内置预览与未接入替身；没有 MQTT worker 或发布接口 |
+| 会话边界 | `libs/application/IDataSource.h:18`，`ClientSession.cpp:5/41/54` | 只传 `ClientSnapshot`，停用和断开会清快照；异步代号隔离还只是接口注释约定 |
+| 界面可操作范围 | `apps/client/qml/Main.qml:57`，`pages/OverviewPage.qml:27`，`pages/DiagnosticsPage.qml:17` | 两页、启停按钮、心跳与日志路径；没有隐藏的比赛菜单或赛事命令 |
+| 五类离线处理 | `libs/protocol/BasicCodec.cpp:190/230/246`，`libs/domain/BasicData.h:21/37/82` | 数组/有限数校验、topic 分发及双向编码；类型保持 P-003 指定优先顺序 |
+| 基础数据检验入口 | `scripts/check-basic-data.ps1:34`，`libs/protocol/CMakeLists.txt:18`，`tests/check_basic_data.py` | CTest、Python/C++双向、模拟器/网页事件检查；本轮只读，未再次运行 |
+| 当前 MQTT 周期 | `simulator/server/mqtt_publisher.py:641/653/671` | 五类新基础消息；旧事件队列和其他旧发布方法未自动构成全消息周期 |
+| 当前 MQTT 上行 | `simulator/server/mqtt_publisher.py:136/170` | 11 个旧 topic 订阅，包含本赛季不再使用的三项旧名称；正式 `MapClickCmd` 未接入 |
+| 网页真实发布分支 | `simulator/server/app.py:449/470/489/493/500/507` | 区分“仅改内存”与“显式旧发布”，防止错误计入联调完成 |
+| 基础状态输入原子校验 | `simulator/server/state_manager.py:1384/1452`，`app.py:261` | 输入先校验，失败返回网页 ACK；静态类型必须与当前 ID 的用户约定匹配 |
+| 网页编辑保护与持久化 | `simulator/server/static/app.js:561/805/813/1200/1381/1819` | 当前 ID 的本机持久化、表单草稿保护、失败提示；不是完整场景存储 |
+| Web视频与独立工具差异 | `simulator/server/video_streamer.py:49/345`，`simulator/tools/video_sender.py:37/108/126` | 两个入口实际整包长度不同，独立工具没有16位帧号回绕 |
+| 私有工业相机分片 | `simulator/server/industrial_camera_streamer.py:483/492` | H.264+末尾packetId，属于旧私有业务；不冒充官方字节通道的内置含义 |
+| 旧UDP模拟格式 | `simulator/server/protocol.py:13/92`，`udp_sender.py:77`，`udp_receiver.py:49` | 简化帧/CRC帧两种旧路径；默认不开，不能替代本赛季MQTT及图传 |
+| 服务退出与归属 | `simulator/server/app.py:65`，`simulator/scripts/common.ps1:76/144/193` | 退出回收自己的任务/线程/子进程；脚本复用外部Broker时不取得停止权 |
+| 演示引擎与并发快照 | `simulator/server/match_simulation_engine.py:44/168/342`，`state_manager.py:3005` | 可重复演示的基础存在；旧事件/判胜待迁移，浅复制快照需修整 |
+
+本节列出的假发送、超长视频包、帧号回绕和浅复制等属于代码缺口，按开发任务处理，不另设协议问题编号。工程机器人请求与2027角色适用范围、固定协议专项审计发现的单位、身份、遮挡、参数和硬件编码等未决内容，由 [01](01_Source_Audit.md)、[03](03_Protocol_Coverage.md) 和 [09](09_Open_Questions.md) 追溯；这些问题不覆盖已明确的基础接收、图传收包/组帧及其他独立任务。
+
+## 10. 统一需求与本报告证据的对应
+
+以下按业务组建立链接，详细逐项状态和统计以[02](02_Requirements.md)为唯一清单，任务和验收分别在[07](07_Task_Backlog.md)、[08](08_Test_and_Acceptance.md)按同一REQ编号追踪。这里的“旧工具”不是客户端部分完成的替代证明。
+
+| 需求ID | 本报告证据入口 | 当前边界与后续动作 |
+| --- | --- | --- |
+| REQ-001 | 第2节Windows/Qt启动；第5节现存Debug构建和脚本运行日志 | 开发骨架已完成；此处不包括正式网络/发行包。配置错误目前留在错误窗口中且不启动数据源，需关闭窗口退出，不是所有错误都立即终止进程 |
+| REQ-002 | 第2节配置读取/持久化；`AppConfig.cpp::loadConfig()` | 现有JSON字段严格读取已有；连接身份、超时、视频网卡配置、写回和应用时机仍缺，部分完成 |
+| REQ-003 | 第2节启停/退出；`ClientSession`和`IDataSource`边界 | 同步预览可启停清数据；异步网络、视频和身份切换资源回收仍缺，部分完成 |
+| REQ-004 | 第2节JSONL日志；`JsonlLogger::open/write()`与历史启动记录 | 启动/状态/退出及失败报告的小范围已完成；高频指标、轮转、原始录包不属于此条已完成范围 |
+| REQ-005 | 第2节固定依赖说明；`cmake/Protobuf.cmake`及生成/运行时检查工具 | Protobuf/Abseil同工具链、固定版本/hash已有；MQTT/视频依赖接入与干净重建仍待对应阶段，部分完成 |
+| REQ-006、REQ-007、REQ-008、REQ-016、REQ-017、REQ-018、REQ-019、REQ-020、REQ-063 | 第2、3、5节；`BasicCodec`、`BasicData`、共享schema及离线样本 | 五类离线部分已有；真正接收、合并、界面显示和更多消息仍缺；P-002/P-003按既有依据保留 |
+| REQ-009、REQ-010、REQ-011、REQ-012、REQ-013、REQ-014、REQ-015 | 第2节MQTT/会话/权威状态行；第9节组合根与会话定位 | 当前无真实通信；建连接、收发、时效、重连及会话边界，不能把模拟心跳记在线 |
+| REQ-021、REQ-022、REQ-023、REQ-024、REQ-025、REQ-026、REQ-027、REQ-028、REQ-080 | 第2、4.2、4.3、4.5节；旧发布器、模块表单和赛事演示 | 模块自检、伤害/复活/机制/事件/增益/判罚/限制均未进入客户端；部分网页只改状态，必须逐条捕获真实负载 |
+| REQ-029、REQ-030、REQ-031、REQ-032、REQ-033、REQ-034、REQ-035 | 第4.2节上行处理表；第6节纵向闭环顺序 | 当前客户端无业务命令；模拟器旧复活分支/索引解释不代表通用兑换、权限和反馈已迁移 |
+| REQ-036、REQ-037、REQ-038、REQ-039 | 第2节输入行；第4.2节键鼠/自定义只打印；第4.4节私有工业相机 | 键鼠采集/安全清键和官方字节通道未接入；禁止自动移植旧H.264私有业务 |
+| REQ-040、REQ-041、REQ-042、REQ-043、REQ-044、REQ-045 | 第4.2、4.3节地图/雷达/路径，`app.js`地图方法与`map_geometry.js` | 当前客户端地图完全缺失；旧地图输入/发布只供迁移参照；P-001仍按指定实际协议接收 |
+| REQ-046、REQ-047、REQ-048、REQ-049、REQ-050、REQ-051 | 第4.2上行和第4.3旧角色区 | 装配、核心、机关、哨兵、飞镖全部须新客户端与模拟器/网页逐组迁移；旧英雄/工程页不能直接换标题交付 |
+| REQ-052、REQ-053、REQ-054、REQ-055、REQ-056 | 第2节视频占位；第4.4节两个HEVC发送入口 | 收包/组帧/解码/展示/恢复尚缺；发送端整包长与独立工具帧号回绕须同步修正 |
+| REQ-057 | 第2节工作台/诊断UI；`Main.qml`及两个页面 | 逐角色正式工作台只有页面骨架可复用，比赛布局和业务控件均缺，按基础壳部分完成，不能算任一比赛角色已可用 |
+| REQ-058 | 第2节运行来源；`ClientViewModel::modeText/connectionText()` | 内置预览/正式待接入的模式和来源提示已有；实际身份/操作端/订阅/时效显示未接入，部分完成 |
+| REQ-059 | 第2节赛事操作/UI；第4.3节事件与旧工具 | 当前无赛事阶段告警和弹窗仲裁；配置错误标签不能代替比赛通知模型，未实现 |
+| REQ-060 | 第2节工作台UI；`Main.qml`最小尺寸和`OverviewPage.qml`响应式列数 | 骨架窗口和自适应布局已有；比赛键位/输入焦点、1080p及DPI目标验收未做，部分完成 |
+| REQ-061、REQ-062 | 第4.1、4.3节独立生命周期与三端状态 | 模拟器独立入口已存在；不要求Qt先启动；迁移各组同步更新后端、网页、客户端并保持同一依据 |
+| REQ-064、REQ-065、REQ-066、REQ-067 | 第4.5、5、6节；退出/归属脚本、浅复制风险 | 已有离线基础检查；端到端、故障、并发、长期稳定及指标仍未验证，需要按闭环逐步增加 |
+| REQ-068、REQ-069、REQ-070、REQ-071、REQ-072、REQ-073 | 第2节日志/发行；第5节历史与本轮区分；第7、8节现场限制 | JSONL只有生命周期；报文留证、干净Windows发行、官方与机器人现场验收、合规均未达到最终完成标准 |
+| REQ-074、REQ-075 | 第5、7节；现有通俗路线/问题记录/脚本 | 继续使用每次一个小任务、Codex负责检查、用户观察和准备设备的方法；更新文档、记录检查和保留可回退版本 |
+| REQ-076、REQ-077、REQ-078、REQ-079 | 第2节回放缺失；第8节阅读/运行边界 | 可选回放、战术、AI/辅助增强及音频不能凭旧项目痕迹记完成，不阻塞核心MQTT/图传接入 |

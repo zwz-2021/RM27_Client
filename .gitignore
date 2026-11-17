@@ -10,6 +10,6 @@ __pycache__/
 *.py[cod]
 /.pytest_cache/
 /logs/
-/docs/
 /tmp/
-
+# Personal Obsidian state remains local.
+**/.obsidian/

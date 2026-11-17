@@ -1,0 +1,103 @@
+# 07 可执行开发任务表
+
+更新时间：2026-11-02。80任务与80需求同号对应，包含4项已有小范围成果的维持/回归、4项可选增强，不是80项全要重写。每次只做一个独立可验收切片，来源和细则见02、实际验收见08。
+
+依赖列引用T编号，含义是所需接口或相应功能切片可用；T-006/007/011/012/062/063/064分批扩充，不能把32消息全量完成当作接入五类前提。阶段列为主要/最终归属，测试/诊断/状态接口/最小UI在前阶段已有对应切片。
+
+| 任务 | 需求/优先级 | 阶段 | 当前状态 | 具体开发和输出 | 模块落点 | 前置切片 | 验收 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| T-001 | REQ-001 / P0 | S1 | 保持/回归 | 维持现有构建运行入口，后续依赖接入不得破坏启动；输出：Windows独立开发启动和可复现记录 | apps/client、application、CMake/scripts | 无 | AT-001 |
+| T-002 | REQ-002 / P1 | S2 | 已有部分基线，继续 | 增加身份/Broker/超时/网卡视频参数与应用时机，支持可控保存；输出：连接与运行配置和可复现记录 | config、diagnostics、presentation | T-001 | AT-002 |
+| T-003 | REQ-003 / P0 | S2 | 已有部分基线，继续 | 会话代号/取消、worker退出、有界等待和资源所有权；输出：会话启动停止和资源回收和可复现记录 | apps/client、application、CMake/scripts | T-001 | AT-003 |
+| T-004 | REQ-004 / P1 | S1 | 保持/回归 | 维持现有JSONL基础记录；高频指标/容量另见067/068；输出：基础运行日志和可复现记录 | config、diagnostics、presentation | T-001 | AT-004 |
+| T-005 | REQ-005 / P1 | S1 | 已有部分基线，继续 | 保留当前固定版本/hash，后续增加MQTT/HEVC工具链验证与许可证；输出：可重复依赖与生成工具和可复现记录 | apps/client、application、CMake/scripts | T-001 | AT-005 |
+| T-006 | REQ-006 / P0 | S2 | 已有部分基线，继续 | 补27种与雷达子结构；分离正式定义/用户约定，禁旧wrapper；输出：全部消息契约与编解码和可复现记录 | protocol、domain | T-005 | AT-006 |
+| T-007 | REQ-007 / P0 | S2 | 已有部分基线，继续 | 逐消息约束、工程负载上限、原始未知值及原子更新；输出：边界合法性及坏包隔离和可复现记录 | protocol、domain | T-006 | AT-007 |
+| T-008 | REQ-008 / P1 | S1 | 保持/回归 | 维持P-003离线范围，网络身份授权另见009/058/071；输出：2027角色及ID解释和可复现记录 | domain、protocol | T-006 | AT-008 |
+| T-009 | REQ-009 / P0 | S2 | 未实施 | 接入MQTT实现，官方192.168.12.1:3333、终端.2、机器人ID作clientID；输出：正式连接和身份配置和可复现记录 | transport、application、protocol | T-002、T-003、T-005 | AT-009 |
+| T-010 | REQ-010 / P0 | S2 | 未实施 | 建立显式Topic表、方向和订阅失败诊断；输出：精确订阅与就绪状态和可复现记录 | transport、application、protocol | T-009、T-006 | AT-010 |
+| T-011 | REQ-011 / P0 | S2 | 未实施 | 适配器/调度/类型分发，保护Qt线程和吞吐；输出：收包到领域数据链和可复现记录 | transport、application、protocol | T-007、T-010、T-015 | AT-011 |
+| T-012 | REQ-012 / P0 | S3 | 未实施 | 统一发布入口、队列上限、发送失败和不自动重放策略；输出：命令发布与发送调度和可复现记录 | transport、application、protocol | T-009、T-006、T-035 | AT-012 |
+| T-013 | REQ-013 / P0 | S2 | 未实施 | 有界退避、手动停止、旧会话隔离、恢复后新鲜度重建；命令发布接入时增量验收不重放；输出：掉线重连重订阅和可复现记录 | transport、application、protocol | T-003、T-009、T-010 | AT-013 |
+| T-014 | REQ-014 / P0 | S2 | 未实施 | 按消息策略设置工程阈值；触发消息不套1Hz离线；本地接收时间诊断；输出：按消息数据新鲜度和可复现记录 | domain、application | T-011 | AT-014 |
+| T-015 | REQ-015 / P0 | S2 | 未实施 | 可回退字段、显式重置、实体归属及未知态；不以本地比分判胜；输出：统一状态、回退与局间清理和可复现记录 | domain、application | T-008、T-006 | AT-015 |
+| T-016 | REQ-016 / P0 | S2 | 已有部分基线，继续 | 接入全部字段模型与最小显示；插值被权威秒值校正；输出：阶段时间比分与结算和可复现记录 | domain、application、presentation、QML | T-015 | AT-016 |
+| T-017 | REQ-017 / P1 | S2 | 已有部分基线，继续 | 补完整字段发布/模型/UI与红蓝视角；输出：基地前哨全队血量控制度和可复现记录 | domain、application、presentation、QML | T-015 | AT-017 |
+| T-018 | REQ-018 / P1 | S2 | 已有部分基线，继续 | 接入全字段，累计经济全过程不丢精度；输出：经济科技和加密等级和可复现记录 | domain、application、presentation、QML | T-015 | AT-018 |
+| T-019 | REQ-019 / P0 | S2 | 已有部分基线，继续 | 全字段接入、单位只标原文明确者、状态缺失可见；输出：静态状态和性能上限和可复现记录 | protocol、domain、application、presentation、simulator | T-015 | AT-019 |
+| T-020 | REQ-020 / P0 | S2 | 已有部分基线，继续 | 全部13字段接入与语义标注，不把能量当瞬时功率；out_of_combat_countdown未标单位时仅保留原值；输出：动态资源与远程许可和可复现记录 | protocol、domain、application、presentation、simulator | T-015 | AT-020 |
+| T-021 | REQ-021 / P1 | S5 | 未实施 | 按2027迁移客户端/模拟器/网页，角色不适用另呈现；输出：模块在线与42mm安装权限和可复现记录 | protocol、domain、application、presentation、simulator | T-006、T-015 | AT-021 |
+| T-022 | REQ-022 / P1 | S6 | 未实施 | 迁移完整分类、复活/换局清理、统计面板；输出：单次存活受伤统计和可复现记录 | protocol、domain、application、presentation、simulator | T-015 | AT-022 |
+| T-023 | REQ-023 / P1 | S6 | 未实施 | 新schema/状态/网页及UI，未给单位不标秒；输出：复活资格费用读条和可复现记录 | protocol、domain、application、presentation、simulator | T-015 | AT-023 |
+| T-024 | REQ-024 / P1 | S6 | 未实施 | 六类机制和长度校验，R/B实体保持固定；输出：全局特殊机制计时和可复现记录 | domain、application、presentation、QML | T-015 | AT-024 |
+| T-025 | REQ-025 / P1 | S6 | 未实施 | 16事件模板、合法参数验证、可控去重/历史容量；输出：16类全局事件和可复现记录 | protocol、domain、application、presentation、QML | T-015 | AT-025 |
+| T-026 | REQ-026 / P1 | S6 | 未实施 | 增益列表和按来源区分的生命周期；未明确时间单位仅原值；不得将所有增益统一战亡清除；来源明确才按来源规则处理，缺少来源字段时不猜出处、不因HP=0统一删Buff，以权威同步和明确时效为准；输出：增益及有效期和可复现记录 | protocol、domain、application、presentation、QML | T-015 | AT-026 |
+| T-027 | REQ-027 / P0 | S6 | 未实施 | 原始类型时长数量、事件性策略和相关可用性；输出：判罚与违规状态和可复现记录 | protocol、domain、application、presentation、QML | T-015 | AT-027 |
+| T-028 | REQ-028 / P0 | S6 | 未实施 | 建立限制原因/范围/起止；确认官方已处理效果避免重复；未明来源不猜；输出：遮挡与限制范围和可复现记录 | application、presentation、QML、发行资源/队伍设备 | T-027、T-025、T-035、T-055 | AT-028 |
+| T-029 | REQ-029 / P1 | S6 | 未实施 | 禁旧英雄3/4；初始化/同步回填不反向发布；输出：步兵性能选择与同步和可复现记录 | application、protocol、transport、simulator、QML | T-035、T-019 | AT-029 |
+| T-030 | REQ-030 / P1 | S6 | 未实施 | 规则价格/上限/最小单位有来源，模拟器扣费后权威同步；输出：普通17/42mm允许量兑换和可复现记录 | application、protocol、transport、simulator、QML | T-035、T-018、T-020 | AT-030 |
+| T-031 | REQ-031 / P1 | S6 | 未实施 | 先确认未定义param；完成失败/重复/重连反馈；输出：免费读条复活确认和可复现记录 | application、protocol、transport、simulator、QML | T-035、T-023 | AT-031 |
+| T-032 | REQ-032 / P1 | S6 | 未实施 | param先明确；费用/结果/重复操作闭环；输出：付费立即复活和可复现记录 | application、protocol、transport、simulator、QML | T-035、T-023 | AT-032 |
+| T-033 | REQ-033 / P1 | S6 | 未实施 | 明确param后实现扣费/6秒延迟及权威到账同步；中途状态变化不擅自套回血失效规则；输出：远程兑换允许发弹量和可复现记录 | application、protocol、transport、simulator、QML | T-035、T-020 | AT-033 |
+| T-034 | REQ-034 / P1 | S6 | 未实施 | 明确param及结算单位，显示等待和失效原因；输出：远程兑换血量和可复现记录 | application、protocol、transport、simulator、QML | T-035、T-020 | AT-034 |
+| T-035 | REQ-035 / P0 | S3 | 未实施 | 统一用例策略、防连点、超时不重放；无流水号不虚构关联；输出：动作条件、限频和结果状态和可复现记录 | application、protocol、transport、simulator、QML | T-007、T-014、T-015 | AT-035 |
+| T-036 | REQ-036 / P0 | S3 | 未实施 | 独立采集与调度、单控制源设置、可观察发送频率；输出：键鼠采集与75Hz发送和可复现记录 | apps/client输入适配、application、protocol、transport | T-012、T-037 | AT-036 |
+| T-037 | REQ-037 / P0 | S3 | 未实施 | 输入状态机与快捷键仲裁，阶段0训练与比赛5秒倒计时分别处理；输出：失焦、断线和受限输入清理和可复现记录 | apps/client输入适配、application、protocol、transport | T-003、T-035 | AT-037 |
+| T-038 | REQ-038 / P1 | S3 | 未实施 | ≤60边界与来源标记；不自动继承旧前哨私有转发；输出：60字节上行通道和可复现记录 | protocol、transport、application消费者接口、simulator | T-012 | AT-038 |
+| T-039 | REQ-039 / P1 | S6 | 未实施 | 限长/订阅/消费者接口；旧H264工业相机不默认加入；输出：300字节下行通道和可复现记录 | protocol、transport、application消费者接口、simulator | T-011 | AT-039 |
+| T-040 | REQ-040 / P1 | S7 | 未实施 | 原值解码先行；单位/坐标基准未明的地图换算待确认；输出：位置原值与归属和可复现记录 | domain坐标、application、protocol、presentation、QML、simulator | T-015 | AT-040 |
+| T-041 | REQ-041 / P1 | S7 | 未实施 | MQTT按相对起点；增量单位/基准明确后才画地图；输出：相对起点路径和可复现记录 | domain坐标、application、protocol、presentation、QML、simulator | T-040、T-045 | AT-041 |
+| T-042 | REQ-042 / P1 | S7 | 未实施 | 按字段3 mode与6 type精确区分，显示收到与本地草稿；输出：标记接收和可复现记录 | domain坐标、application、protocol、presentation、QML、simulator | T-015、T-045 | AT-042 |
+| T-043 | REQ-043 / P1 | S7 | 未实施 | 正确Topic、固定7字节机器人ID/ASCII、坐标逆变换与等待态；输出：地图标记与发送和可复现记录 | domain坐标、application、protocol、presentation、QML、simulator | T-035、T-042、T-045 | AT-043 |
+| T-044 | REQ-044 / P1 | S7 | 未实施 | 实读指定发送器后接收；2/102保留槽；0/1/2特殊标识；输出：雷达位置与特殊标识和可复现记录 | domain坐标、application、protocol、presentation、QML、simulator | T-006、T-015、T-045 | AT-044 |
+| T-045 | REQ-045 / P1 | S7 | 未实施 | 坐标变换独立于QML，未知/越界/过期处理；不跨接口猜单位；输出：坐标边界与红蓝视角和可复现记录 | domain坐标、application、protocol、presentation、QML、simulator | T-008、T-015 | AT-045 |
+| T-046 | REQ-046 / P1 | S8 | 未实施 | 四难度解锁、四级45秒/协作≤5秒、失败屏蔽1秒和结果码；输出：装配开始、确认、取消和结果和可复现记录 | application重装用例、domain、protocol、presentation、QML、simulator | T-035、T-047 | AT-046 |
+| T-047 | REQ-047 / P1 | S8 | 未实施 | 8字段和条件有效性；时间单位未明时保原值；输出：科技核心步骤状态和可复现记录 | application重装用例、domain、protocol、presentation、QML、simulator | T-015 | AT-047 |
+| T-048 | REQ-048 / P1 | S8 | 未实施 | 小/大机关、20秒窗口及失败场景；来源不足不编造剩余机会字段；输出：能量机关激活与状态和可复现记录 | application机关用例、domain、protocol、QML、simulator | T-035、T-025 | AT-048 |
+| T-049 | REQ-049 / P1 | S7 | 未实施 | 选择同步与3字段状态接入，阶段限制与角色边界；输出：控制方式与姿态显示和可复现记录 | application哨兵用例、protocol、domain、presentation、QML、simulator | T-035、T-015 | AT-049 |
+| T-050 | REQ-050 / P1 | S7 | 未实施 | 按50金币/姿态5秒冷却/强化15秒等适用规则；相同命令串行；输出：指挥干预与明确结果和可复现记录 | application哨兵用例、protocol、domain、presentation、QML、simulator | T-035、T-049 | AT-050 |
+| T-051 | REQ-051 / P1 | S8 | 未实施 | 规则机会/冷却/30秒窗/移动完成、二次确认和同步；输出：目标闸门确认发射和可复现记录 | application飞镖用例、protocol、domain、QML、simulator | T-035、T-015 | AT-051 |
+| T-052 | REQ-052 / P0 | S4 | 未实施 | 独立socket、绑定错误/包长度/来源诊断；修正模拟器超长发送；输出：UDP收包与大端头校验和可复现记录 | video、transport UDP、apps/client帧显示适配、simulator视频工具 | T-003、T-005 | AT-052 |
+| T-053 | REQ-053 / P0 | S4 | 未实施 | 单帧/在途帧/总内存/等待上限，冲突头丢帧；片号基准记录待实测；输出：有界分片重组和可复现记录 | video、transport UDP、apps/client帧显示适配、simulator视频工具 | T-052 | AT-053 |
+| T-054 | REQ-054 / P0 | S4 | 未实施 | 软件解码基线、参数集/关键帧恢复、工具链依赖；可选硬解另评估；输出：HEVC连续解码和可复现记录 | video、transport UDP、apps/client帧显示适配、simulator视频工具 | T-053、T-005 | AT-054 |
+| T-055 | REQ-055 / P0 | S4 | 未实施 | 专用帧通道/有界队列/画面尺寸适配，限制层独立；输出：Qt Quick视频显示和可复现记录 | video、transport UDP、apps/client帧显示适配、simulator视频工具 | T-054 | AT-055 |
+| T-056 | REQ-056 / P0 | S4 | 未实施 | 断流/关键帧等待/错误状态，恢复资源复位与日志；输出：丢包断流解码恢复和可复现记录 | video、transport UDP、apps/client帧显示适配、simulator视频工具 | T-053、T-054、T-055 | AT-056 |
+| T-057 | REQ-057 / P1 | S9 | 已有部分基线，继续 | 复用现有分层/页壳，先最小状态页后正式布局；禁正式mock回退；输出：逐角色正式工作台和可复现记录 | presentation、apps/client/qml、application | T-016、T-019、T-020、T-055、T-059 | AT-057 |
+| T-058 | REQ-058 / P0 | S2 | 已有部分基线，继续 | 扩展现有启停/来源卡，不将模拟器网页在线当机器人在线；输出：连接身份与运行来源可见和可复现记录 | presentation、apps/client/qml、application | T-002、T-009、T-014 | AT-058 |
+| T-059 | REQ-059 / P1 | S9 | 未实施 | 统一通知/容量/去重、弹窗输入阻断和取消条件；输出：阶段告警和弹窗仲裁和可复现记录 | presentation、apps/client/qml、application | T-028、T-035、T-037 | AT-059 |
+| T-060 | REQ-060 / P1 | S9 | 已有部分基线，继续 | 测目标屏/DPI和键位提示，按角色切换保持一致；输出：显示适配、焦点与操作体验和可复现记录 | presentation、apps/client/qml、application | T-037、T-057 | AT-060 |
+| T-061 | REQ-061 / P0 | S1 | 保持/回归 | 维持独立入口/脚本/PID归属，不把业务耦合入客户端；输出：独立服务与生命周期和可复现记录 | simulator/server、static、protocol、scripts/tools | T-001 | AT-061 |
+| T-062 | REQ-062 / P1 | S5 | 已有部分基线，继续 | 逐组迁移默认状态/周期/命令/网页/判胜；修浅复制并发风险；输出：协议状态命令网页同步迁移和可复现记录 | simulator/server、static、protocol、scripts/tools | T-006、T-061 | AT-062 |
+| T-063 | REQ-063 / P0 | S2 | 已有部分基线，继续 | 保留双向工具，加每条字段/频率/长度/最高QoS独立断言；输出：独立协议契约与字节样本和可复现记录 | libs/protocol/tests、tests、simulator/tools、独立场景驱动 | T-006、T-007 | AT-063 |
+| T-064 | REQ-064 / P0 | S9 | 已有部分基线，继续 | 自动驱动最小UI/用例，捕获消息和客户端结果，分角色验收；输出：真实Broker端到端场景和可复现记录 | libs/protocol/tests、tests、simulator/tools、独立场景驱动 | T-011、T-012、T-062、T-063 | AT-064 |
+| T-065 | REQ-065 / P1 | S9 | 已有部分基线，继续 | 独立故障驱动，不把旧清除场景当任意丢包；不干扰用户服务；输出：异常和故障注入和可复现记录 | libs/protocol/tests、tests、simulator/tools、独立场景驱动 | T-063、T-064 | AT-065 |
+| T-066 | REQ-066 / P0 | S9 | 未实施 | 线程/锁/快照原子性、压力和30分钟工程基线、实机预算；输出：并发负载和稳定运行和可复现记录 | transport、video、application、diagnostics、simulator故障驱动 | T-013、T-037、T-056、T-065 | AT-066 |
+| T-067 | REQ-067 / P1 | S4 | 未实施 | 统计计数/窗口聚合，诊断页输出可导出记录；输出：链路指标与故障定位和可复现记录 | config、diagnostics、presentation | T-011、T-052 | AT-067 |
+| T-068 | REQ-068 / P1 | S9 | 未实施 | 容量/轮转/采样、版本与时间基准，离线重现入口；私密配置脱敏；输出：有界录包与诊断导出和可复现记录 | config、diagnostics、presentation | T-004、T-067 | AT-068 |
+| T-069 | REQ-069 / P0 | S10 | 未实施 | 独立打包/版本号/完整清单/启动说明，消除个人绝对路径；输出：Windows Release发行包和可复现记录 | CMake/scripts发行工具、configs、运行库、目标Windows机 | T-005、T-066 | AT-069 |
+| T-070 | REQ-070 / P0 | S10 | 未实施 | 干净机/有线IP说明、端口占用、DPI、多屏/输入与性能实测；输出：目标Windows电脑验收和可复现记录 | CMake/scripts发行工具、configs、运行库、目标Windows机 | T-069 | AT-070 |
+| T-071 | REQ-071 / P0 | S10 | 未实施 | 记录官方设备/软件/配置/原始报文及支持边界，不改固定PDF；输出：官方接口和操作端身份验证和可复现记录 | 发行程序、官方接口/机器人、队伍现场记录 | T-069、T-070 | AT-071 |
+| T-072 | REQ-072 / P0 | S10 | 未实施 | 按支持角色实测并留现场安全条件/版本结果；不模拟硬件已测；输出：机器人全流程与现场演练和可复现记录 | 发行程序、官方接口/机器人、队伍现场记录 | T-071、T-066 | AT-072 |
+| T-073 | REQ-073 / P0 | S10 | 已有部分基线，继续 | 软件资源审查与队伍硬件清单：≤30V/收纳尺寸/无无线/接口检录分责；输出：信息、设备与现场使用边界和可复现记录 | application、presentation、QML、发行资源/队伍设备 | T-028、T-069 | AT-073 |
+| T-074 | REQ-074 / P1 | S0 | 已有部分基线，继续 | 完成九文档、覆盖检查；后续持续更新事实/历史/待验证界限；输出：可追溯文档和小任务记录和可复现记录 | docs/planning、development-roadmap、development-gaps、各模块说明 | 无 | AT-074 |
+| T-075 | REQ-075 / P1 | S10 | 未实施 | 版本标识、包校验、配置导入/回退说明，不部署自动更新；输出：稳定版本与现场回退和可复现记录 | CMake/scripts发行工具、configs、运行库、目标Windows机 | T-069、T-070 | AT-075 |
+| T-076 | REQ-076 / P2 | SX | 可选未实施 | 先保证留证，后做回放UI/时间轴；不进入比赛核心依赖；输出：用户数据回放和可复现记录 | 独立可选模块、presentation、QML（不进入核心依赖） | T-068 | AT-076 |
+| T-077 | REQ-077 / P2 | SX | 可选未实施 | 仅队伍确认后迁移威胁排序/趋势；基本地图已由040-045覆盖；输出：战术资源分析与预测和可复现记录 | 独立可选模块、presentation、QML（不进入核心依赖） | T-015、T-045 | AT-077 |
+| T-078 | REQ-078 / P2 | SX | 可选未实施 | 独立开关/算力预算/模型和素材许可，另查适用允许条件；输出：AI视觉与AR辅助和可复现记录 | 独立可选模块、presentation、QML（不进入核心依赖） | T-054、T-066、T-073 | AT-078 |
+| T-079 | REQ-079 / P2 | SX | 可选未实施 | 先实用UI，再按偏好加音频去重/音量/主题，检查品牌和授权；输出：语音提示与视觉主题和可复现记录 | 独立可选模块、presentation、QML（不进入核心依赖） | T-057、T-059、T-073 | AT-079 |
+| T-080 | REQ-080 / P1 | S5 | 未实施 | 模块状态首批迁移后做可观察自检；适用必要项逐项就绪，不适用不算故障，未收到不算正常；输出：模块与链路自检清单和可复现记录 | application自检、presentation、QML、simulator模块/链路场景 | T-021、T-014、T-058 | AT-080 |
+
+## 按纵向闭环选择小任务
+
+1. 首个接收：T-002/003/009/015/010/011，加T-014/016/019/020/058/063五类切片。先状态接口、适配器，再显示，保留既有脚本。
+2. 恢复：T-013/014/003，实际停Broker/停Topic/切身份，命令接入后增验不重放。
+3. 明确命令：T-035/012与T-029步兵性能字段先闭环，再T-037/036/038。P006不阻塞框架。
+4. 视频：T-052→053→054→055→056及T-067，先修模拟器实际包长/回绕，与输入可并行。
+5. 模块优先：T-021/080和T-062本组网页/负载/处理；不可只改标签。
+6. S6/S7/S8各组同时做契约/校验/三端/独立测试增量，S9正式UI和联合验收，S10发行/官方/实机。
+
+P004相关T-026/040/041/043/045/046/047先做明确字段和原值，不猜单位；P005限制源影响T-028及最终T-071；P006影响T-031..034 param，T-030明确普通兑换可继续；P007操作端授权待验证；P008仅未来硬件雷达工具，不阻塞桌面；P009示例QoS差异按明确最高1实现并保留来源记录。P001按用户基准安排T-044，不退回无方案隔离。
+
+旧英雄部署/空中支援、S1私有登录、旧UDP wrapper、前哨自动私包、Linux客户端SSH等有04舍弃/替代记录，不是漏任务，也不是2027已具备能力。
+
+每个任务交付记录：T/REQ/AT、源码版本/配置、依据章页、三端实际改动、启动、预期、检查入口及真实结果、证据、未实现/未验证、P编号。网页提交或PUBACK都不当最终成功，没有设备不能打已通过。

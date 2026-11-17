@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800" role="img" aria-labelledby="title desc">
+  <title id="title">RMUC 2027 自定义终端客户端分层架构</title>
+  <desc id="desc">从上到下为展示层、业务逻辑层和基础设施层。实心蓝块为当前代码模块，虚线块为赛季规划模块。视频帧由解码模块直接送入 Qt Quick 视频画面。</desc>
+  <defs>
+    <marker id="control-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 Z" fill="#405d82"/></marker>
+    <marker id="frame-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 Z" fill="#4476ac"/></marker>
+    <style>
+      text { font-family: 'Microsoft YaHei', 'Noto Sans CJK SC', 'DengXian', sans-serif; fill: #162e4d; }
+      .heading { font-size: 28px; font-weight: 700; }
+      .legend { font-size: 17px; }
+      .band { fill: #eaf1fd; stroke: #8aa9d2; stroke-width: 1.4; }
+      .band-name { font-size: 23px; font-weight: 700; }
+      .done { fill: #305892; stroke: #305892; stroke-width: 1.5; }
+      .plan { fill: #ffffff; stroke: #597fb3; stroke-width: 1.8; stroke-dasharray: 7 4; }
+      .node-name { font-size: 20px; font-weight: 600; }
+      .node-detail { font-size: 16px; }
+      .on-blue { fill: white; }
+      .on-light { fill: #173759; }
+      .link-label { font-size: 16px; fill: #364f71; }
+      .control { fill: none; stroke: #405d82; stroke-width: 1.8; marker-end: url(#control-arrow); }
+      .frames { fill: none; stroke: #4476ac; stroke-width: 2; stroke-dasharray: 8 5; marker-end: url(#frame-arrow); }
+    </style>
+  </defs>
+  <rect width="1200" height="800" fill="#fff"/>
+  <text x="26" y="42" class="heading">RMUC 2027 自定义终端客户端架构</text>
+  <rect x="823" y="23" width="27" height="17" rx="2" class="done"/><text x="862" y="38" class="legend">现有模块</text>
+  <rect x="989" y="23" width="27" height="17" rx="2" class="plan"/><text x="1028" y="38" class="legend">规划模块</text>
+  <rect x="26" y="65" width="1100" height="176" rx="4" class="band"/><text x="44" y="95" class="band-name">展示层</text>
+  <g><rect x="44" y="105" width="710" height="46" rx="3" class="done"/><text x="399" y="135" text-anchor="middle" class="node-name on-blue">Main.qml 主窗口　·　ClientViewModel 界面属性</text></g>
+  <g><rect x="768" y="105" width="339" height="46" rx="3" class="plan"/><text x="937.5" y="135" text-anchor="middle" class="node-name on-light">Qt Quick 视频画面</text></g>
+  <g><rect x="44" y="162" width="345" height="63" rx="3" class="plan"/><text x="216.5" y="191.5" text-anchor="middle" class="node-name on-light">重装主操作台</text><text x="216.5" y="213.5" text-anchor="middle" class="node-detail on-light">HDMI 主屏 · 图传与装配步骤</text></g>
+  <g><rect x="403" y="162" width="345" height="63" rx="3" class="plan"/><text x="575.5" y="191.5" text-anchor="middle" class="node-name on-light">步兵只读屏 × 2</text><text x="575.5" y="213.5" text-anchor="middle" class="node-detail on-light">第一视角图传 · 机器人状态</text></g>
+  <g><rect x="762" y="162" width="345" height="63" rx="3" class="plan"/><text x="934.5" y="191.5" text-anchor="middle" class="node-name on-light">指挥手工作台</text><text x="934.5" y="213.5" text-anchor="middle" class="node-detail on-light">态势地图 · 哨兵与飞镖面板</text></g>
+  <path d="M 307 284 V 244" class="control"/><text x="323" y="270" class="link-label">会话状态与指令反馈</text>
+  <path d="M 720 244 V 284" class="control"/><text x="736" y="270" class="link-label">重装与指挥席的操作意图</text>
+  <rect x="26" y="287" width="1100" height="183" rx="4" class="band"/><text x="44" y="317" class="band-name">业务逻辑层</text>
+  <g><rect x="44" y="329" width="525" height="54" rx="3" class="done"/><text x="306.5" y="354" text-anchor="middle" class="node-name on-blue">ClientSession　会话管理</text><text x="306.5" y="376" text-anchor="middle" class="node-detail on-blue">启停 · 身份匹配 · 数据时效</text></g>
+  <g><rect x="583" y="329" width="524" height="54" rx="3" class="done"/><text x="845" y="354" text-anchor="middle" class="node-name on-blue">BasicState　领域状态</text><text x="845" y="376" text-anchor="middle" class="node-detail on-blue">比赛、机器人、经济等五类基础数据</text></g>
+  <g><rect x="44" y="395" width="345" height="59" rx="3" class="plan"/><text x="216.5" y="422.5" text-anchor="middle" class="node-name on-light">席位与操作权限</text><text x="216.5" y="444.5" text-anchor="middle" class="node-detail on-light">步兵零业务发布 · 身份与限频</text></g>
+  <g><rect x="403" y="395" width="345" height="59" rx="3" class="plan"/><text x="575.5" y="422.5" text-anchor="middle" class="node-name on-light">重装控制与装配</text><text x="575.5" y="444.5" text-anchor="middle" class="node-detail on-light">控制器输入转换 · 装配结果</text></g>
+  <g><rect x="762" y="395" width="345" height="59" rx="3" class="plan"/><text x="934.5" y="422.5" text-anchor="middle" class="node-name on-light">指挥席赛事交互</text><text x="934.5" y="444.5" text-anchor="middle" class="node-detail on-light">地图标记 · 哨兵干预 · 飞镖控制</text></g>
+  <path d="M 307 513 V 473" class="control"/><text x="323" y="499" class="link-label">赛事消息、连接状态与输入样本</text>
+  <path d="M 720 473 V 513" class="control"/><text x="736" y="499" class="link-label">经席位校验的发布请求</text>
+  <rect x="26" y="516" width="1100" height="195" rx="4" class="band"/><text x="44" y="546" class="band-name">基础设施层</text>
+  <g><rect x="44" y="558" width="345" height="60" rx="3" class="done"/><text x="216.5" y="586" text-anchor="middle" class="node-name on-blue">MQTT 数据接收</text><text x="216.5" y="608" text-anchor="middle" class="node-detail on-blue">Paho · MqttDataSource</text></g>
+  <g><rect x="403" y="558" width="345" height="60" rx="3" class="done"/><text x="575.5" y="586" text-anchor="middle" class="node-name on-blue">Protobuf 基础消息编解码</text><text x="575.5" y="608" text-anchor="middle" class="node-detail on-blue">protocol::decode / encode</text></g>
+  <g><rect x="762" y="558" width="345" height="60" rx="3" class="done"/><text x="934.5" y="586" text-anchor="middle" class="node-name on-blue">配置与日志</text><text x="934.5" y="608" text-anchor="middle" class="node-detail on-blue">AppConfig · JsonlLogger</text></g>
+  <g><rect x="44" y="633" width="345" height="62" rx="3" class="plan"/><text x="216.5" y="662" text-anchor="middle" class="node-name on-light">有线控制器接入</text><text x="216.5" y="684" text-anchor="middle" class="node-detail on-light">读取重装控制器输入</text></g>
+  <g><rect x="403" y="633" width="345" height="62" rx="3" class="plan"/><text x="575.5" y="662" text-anchor="middle" class="node-name on-light">MQTT 业务发布</text><text x="575.5" y="684" text-anchor="middle" class="node-detail on-light">CustomControl · 席位赛事指令</text></g>
+  <g><rect x="762" y="633" width="345" height="62" rx="3" class="plan"/><text x="934.5" y="662" text-anchor="middle" class="node-name on-light">UDP 图传接收与解码</text><text x="934.5" y="684" text-anchor="middle" class="node-detail on-light">分片重组 · H.265 / HEVC</text></g>
+  <path d="M 1108 664 H 1153 V 128 H 1109" class="frames"/>
+  <text class="link-label" transform="translate(1180 399) rotate(-90)" text-anchor="middle">解码后的视频帧直达显示层</text>
+  <line x1="26" y1="741" x2="1126" y2="741" stroke="#c5d3e4"/>
+  <text x="44" y="773" class="node-name">外部设备与服务</text>
+  <text x="254" y="773" class="legend">官方赛事引擎及图传设备</text>
+  <text x="576" y="773" class="legend">本队有线控制器</text>
+  <text x="835" y="773" class="legend">独立模拟器（开发环境）</text>
+</svg>

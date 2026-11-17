@@ -1,0 +1,97 @@
+@startuml
+' ===== 统一配色：所有分层、模块和连线均使用“外部设备与服务”的样式 =====
+!$sectionFill   = "#F6F8FA"
+!$sectionBorder = "#8AA9D2"
+!$moduleFill    = "#F2F5F8"
+!$moduleBorder  = "#8799AB"
+!$textColor     = "#32485F"
+!$pageFill      = "#FFFFFF"
+' ===== 配色结束 =====
+
+!$moduleStyle = $moduleFill + ";line:" + %substr($moduleBorder, 1) + ";text:" + %substr($textColor, 1)
+
+title RMUC 2027 自定义终端客户端架构
+top to bottom direction
+skinparam backgroundColor $pageFill
+skinparam defaultFontColor $textColor
+skinparam packageBorderColor $sectionBorder
+skinparam ArrowColor $moduleBorder
+skinparam ArrowFontColor $textColor
+skinparam legendBackgroundColor $moduleFill
+skinparam legendBorderColor $moduleBorder
+skinparam legendFontColor $textColor
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 14
+skinparam nodesep 20
+skinparam ranksep 36
+
+package "展示层" as UI $sectionFill {
+  rectangle "Main.qml 主窗口\nClientViewModel 界面属性" as MAIN $moduleStyle
+  rectangle "Qt Quick 视频画面（规划）" as SURFACE $moduleStyle
+  rectangle "重装主操作台（规划）\nHDMI 主屏与装配步骤" as HEAVY_UI $moduleStyle
+  rectangle "步兵只读屏 × 2（规划）\n第一视角图传与机器人状态" as INF_UI $moduleStyle
+  rectangle "指挥手工作台（规划）\n态势地图、哨兵与飞镖面板" as CMD_UI $moduleStyle
+
+  MAIN -[hidden]right-> SURFACE
+  HEAVY_UI -[hidden]right-> INF_UI
+  INF_UI -[hidden]right-> CMD_UI
+  MAIN -[hidden]down-> HEAVY_UI
+  SURFACE -[hidden]down-> CMD_UI
+}
+
+package "业务逻辑层" as LOGIC $sectionFill {
+  rectangle "ClientSession 会话管理\n身份匹配、启停与数据时效" as SESSION $moduleStyle
+  rectangle "BasicState 领域状态\n五类比赛与机器人基础数据" as STATE $moduleStyle
+  rectangle "席位与操作权限（规划）\n步兵零业务发布" as POLICY $moduleStyle
+  rectangle "重装控制与装配（规划）\n控制器输入与装配结果" as HEAVY $moduleStyle
+  rectangle "指挥席赛事交互（规划）\n地图标记、哨兵干预与飞镖控制" as COMMAND $moduleStyle
+
+  SESSION -[hidden]right-> STATE
+  POLICY -[hidden]right-> HEAVY
+  HEAVY -[hidden]right-> COMMAND
+  SESSION -[hidden]down-> POLICY
+}
+
+package "基础设施层" as INFRA $sectionFill {
+  rectangle "MQTT 数据接收\nPaho / MqttDataSource" as RX $moduleStyle
+  rectangle "Protobuf 基础消息编解码\nprotocol::decode / encode" as CODEC $moduleStyle
+  rectangle "配置与日志\nAppConfig / JsonlLogger" as CONFIG $moduleStyle
+  rectangle "有线控制器接入（规划）\n读取重装控制器输入" as INPUT $moduleStyle
+  rectangle "MQTT 业务发布（规划）\nCustomControl → 机器人侧 0x0311\n按席位授权发送赛事指令" as TX $moduleStyle
+  rectangle "UDP 图传接收与解码（规划）\n分片重组与 HEVC 解码" as VIDEO $moduleStyle
+
+  RX -[hidden]right-> CODEC
+  CODEC -[hidden]right-> CONFIG
+  INPUT -[hidden]right-> TX
+  TX -[hidden]right-> VIDEO
+  RX -[hidden]down-> INPUT
+}
+
+package "外部设备与服务" as EXT $sectionFill {
+  rectangle "官方赛事引擎\n及图传链路" as ENGINE $moduleStyle
+  rectangle "本队有线控制器" as DEVICE $moduleStyle
+  rectangle "独立模拟器\n开发环境" as SIM $moduleStyle
+  ENGINE -[hidden]right-> DEVICE
+  DEVICE -[hidden]right-> SIM
+}
+
+label "<color:$textColor> ↑  会话状态与指令结果                       ↓  重装与指挥席的操作意图 </color>" as UI_BUS
+INF_UI -[hidden]down-> UI_BUS
+UI_BUS -[hidden]down-> STATE
+HEAVY_UI -[hidden]down-> SESSION
+POLICY -[hidden]down-> RX
+label "<color:$textColor> ↑  赛事消息、连接状态与输入样本                ↓  经席位校验的发布请求 </color>" as BIZ_BUS
+HEAVY -[hidden]down-> BIZ_BUS
+BIZ_BUS -[hidden]down-> CODEC
+COMMAND -[hidden]down-> CONFIG
+INPUT -[hidden]down-> ENGINE
+TX -[hidden]down-> DEVICE
+VIDEO -[hidden]down-> SIM
+VIDEO -[norank]-> SURFACE : 解码后的视频帧
+
+legend bottom
+  （规划）表示本赛季计划开发的模块
+endlegend
+@enduml
