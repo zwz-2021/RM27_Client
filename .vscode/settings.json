@@ -61,5 +61,6 @@
         }
       ]
     }
-  ]
+  ],
+  "cmake.cmakePath": "D:/Qt6/Tools/CMake_64/bin/cmake.exe"
 }
