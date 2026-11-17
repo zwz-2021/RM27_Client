@@ -10,10 +10,23 @@
 
 ```powershell
 .\scripts\build.ps1 -Configuration Release -HevcProbe
-python tests/check_hevc_decode.py --configuration Release
+python tests/check_hevc_decode.py --configuration Release --long-1080p
 ```
 
 脚本会在输出的证据目录中生成 `known-1080p60.hevc`，用编码前的像素逐帧验证解码结果。也可将任意本地 Annex B HEVC 文件传给 `.\scripts\run.ps1 -Configuration Release -SkipBuild -HevcFile <文件路径>`。每个 `frame` 行给出显示序号、尺寸和像素摘要。最后的 `summary` 行给出完整帧数和结束状态。加 `-StopAfter 3` 可观察提前停止。
+
+### 手动核对后台交付的像素帧
+
+运行上面的构建和 Python 检查。终端应显示 `PASS: callbacks off the caller thread`，并打印本次证据目录。`--long-1080p` 会用同一组编码前像素核对连续 1008 个全尺寸输出帧。要直接观察停止、持帧和重开，在同一 PowerShell 中执行以下命令。
+
+```powershell
+$report = Get-ChildItem .\logs\check-hevc-*\summary.json | Where-Object { Test-Path (Join-Path $_.DirectoryName 'many-frames/first-picture.hevc') } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$large = Join-Path $report.DirectoryName 'known-1080p60.hevc'
+$small = Join-Path $report.DirectoryName 'many-frames/first-picture.hevc'
+.\scripts\run.ps1 -Configuration Release -SkipBuild -HevcFile @($large, $small) -StopAfter 3
+```
+
+第一段输出 3 帧后显示 `stopped` 和 `frameCallbacksOffMainThread: true`。在 `firstFrameAfterClose` 中可读到工作线程结束后重新计算的首帧摘要。第二段从序号 1 开始，尺寸为 64×64，读完后显示 `completed`。此时 `previousFirstFrameAfterClose` 的尺寸仍为 1920×1080，摘要应与第一段的首帧逐字相同。自动检查还会把这些数值和编码前的像素对照。
 
 ### 手动核对同一文件损坏后恢复
 

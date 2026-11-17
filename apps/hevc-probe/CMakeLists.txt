@@ -1,5 +1,5 @@
 add_executable(RM27_HevcDecodeProbe main.cpp)
-target_link_libraries(RM27_HevcDecodeProbe PRIVATE Qt6::Core)
+target_link_libraries(RM27_HevcDecodeProbe PRIVATE rm27_video)
 set_target_properties(RM27_HevcDecodeProbe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 if(BUILD_TESTING)

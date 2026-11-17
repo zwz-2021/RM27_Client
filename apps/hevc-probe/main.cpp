@@ -1,152 +1,75 @@
+#include "video/HevcFileDecoder.h"
 #include <QCommandLineParser>
 #include <QCoreApplication>
-#include <QFile>
-#include <QFileInfo>
+#include <QCryptographicHash>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QProcess>
-#include <QRegularExpression>
+#include <QThread>
 #include <cstdio>
+#include <optional>
+#include <utility>
 
 namespace {
 
-constexpr int MaxWidth = 1920;
-constexpr int MaxHeight = 1080;
-// HEVC may pad the coded picture to a full coding-tree row before cropping to 1080.
-constexpr int MaxCodedPixels = MaxWidth * 1088;
-constexpr int MaxReportLineBytes = 1024;
-constexpr int ShortClipTimeoutMs = 120000;
+using rm27::video::DecodedVideoFrame;
+using rm27::video::HevcFileDecoder;
 
-void writeEvent(QFile &output, const QJsonObject &event)
+void writeEvent(const QJsonObject &event)
 {
-    output.write(QJsonDocument(event).toJson(QJsonDocument::Compact) + '\n');
-    output.flush();
+    const QByteArray line = QJsonDocument(event).toJson(QJsonDocument::Compact) + '\n';
+    std::fwrite(line.constData(), 1, size_t(line.size()), stdout);
+    std::fflush(stdout);
 }
 
-// FFmpeg hashes each decoded rawvideo frame. Only short report lines cross the pipe.
-class FrameReader {
-public:
-    FrameReader(QFile &output, int stopAfter) : output_(output), stopAfter_(stopAfter) {}
-
-    void drain(QProcess &decoder)
-    {
-        while (decoder.canReadLine() && error.isEmpty() && !stopped) {
-            const auto line = decoder.readLine(MaxReportLineBytes);
-            if (!line.endsWith('\n')) {
-                error = QStringLiteral("FFmpeg 帧校验报告的行过长");
-                break;
-            }
-            readLine(QString::fromLatin1(line).trimmed());
-        }
-        if (decoder.bytesAvailable() >= MaxReportLineBytes && !stopped && error.isEmpty())
-            error = QStringLiteral("FFmpeg 帧校验报告的行过长");
-    }
-
-    int frames = 0;
-    bool stopped = false;
-    QString error;
-
-private:
-    void readLine(const QString &line)
-    {
-        static const QString dimensions = QStringLiteral("#dimensions 0: ");
-        if (line.startsWith(dimensions)) {
-            const auto size = line.sliced(dimensions.size()).split('x');
-            width_ = size.value(0).toInt();
-            height_ = size.value(1).toInt();
-            if (size.size() != 2 || width_ < 1 || width_ > MaxWidth || height_ < 1 || height_ > MaxHeight)
-                error = QStringLiteral("不支持的解码输出尺寸：%1").arg(line);
-            return;
-        }
-        if (line.startsWith('#'))
-            return;
-
-        // framehash v1 columns: stream, DTS, PTS, duration, raw packet size, digest.
-        static const QRegularExpression frame(
-            QStringLiteral(R"(^0,\s*-?\d+,\s*-?\d+,\s*\d+,\s*(\d+),\s*([0-9a-f]{64})$)"));
-        const auto match = frame.match(line);
-        const int chromaBytes = ((width_ + 1) / 2) * ((height_ + 1) / 2);
-        const int yuvBytes = width_ * height_ + 2 * chromaBytes;
-        if (!match.hasMatch() || !yuvBytes || match.captured(1).toInt() != yuvBytes) {
-            error = QStringLiteral("FFmpeg 输出的帧校验报告与 YUV420p 尺寸不符：%1").arg(line);
-            return;
-        }
-        writeEvent(output_, {{"event", "frame"}, {"index", ++frames}, {"width", width_},
-                             {"height", height_}, {"sha256", match.captured(2)}});
-        stopped = frames == stopAfter_;
-    }
-
-    QFile &output_;
-    int stopAfter_;
-    int width_ = 0;
-    int height_ = 0;
-};
-
-bool decodeFile(const QString &file, int stopAfter, QFile &output)
+QJsonObject describeFrame(const DecodedVideoFrame &frame)
 {
-    FrameReader reader(output, stopAfter);
-    QByteArray diagnostics;
-    QProcess decoder;
-    const auto drainFrames = [&] {
-        reader.drain(decoder);
-        if ((reader.stopped || !reader.error.isEmpty()) && decoder.state() != QProcess::NotRunning)
-            decoder.kill();
-    };
-    const auto drainDiagnostics = [&] {
-        diagnostics = (diagnostics + decoder.readAllStandardError()).right(4096);
-    };
-    QObject::connect(&decoder, &QProcess::readyReadStandardOutput, drainFrames);
-    QObject::connect(&decoder, &QProcess::readyReadStandardError, drainDiagnostics);
+    const auto digest = QCryptographicHash::hash(frame.pixels, QCryptographicHash::Sha256);
+    return {{"index", frame.index}, {"width", frame.width}, {"height", frame.height},
+            {"sha256", QString::fromLatin1(digest.toHex())}};
+}
 
-    const QFileInfo input(file);
-    if (!input.isFile()) {
-        reader.error = QStringLiteral("找不到本地视频文件：%1").arg(file);
-    } else {
-        // Keep decoding after a damaged picture so a later independent picture can be read.
-        decoder.start("ffmpeg", {"-hide_banner", "-nostdin", "-loglevel", "error",
-            "-protocol_whitelist", "file", "-hwaccel", "none", "-c:v", "hevc", "-threads", "2",
-            "-max_pixels", QString::number(MaxCodedPixels),
-            "-err_detect", "explode", "-f", "hevc", "-i", input.absoluteFilePath(), "-map", "0:v:0",
-            "-fps_mode", "passthrough", "-pix_fmt", "yuv420p", "-c:v", "rawvideo", "-f", "framehash",
-            "-format_version", "1", "-hash", "sha256", "-flush_packets", "1", "pipe:1"});
-        if (!decoder.waitForStarted()) {
-            reader.error = QStringLiteral("无法启动 FFmpeg，请检查 PATH：%1").arg(decoder.errorString());
-            if (decoder.state() != QProcess::NotRunning) {
-                decoder.kill();
-                decoder.waitForFinished(-1);
-            }
-        } else {
-            if (!decoder.waitForFinished(ShortClipTimeoutMs) && decoder.state() != QProcess::NotRunning) {
-                reader.error = QStringLiteral("本地短片解码超时");
-                decoder.kill();
-                decoder.waitForFinished(-1);
-            }
-            drainFrames();
-            drainDiagnostics();
-            if (!reader.stopped && reader.error.isEmpty()) {
-                if (decoder.exitStatus() != QProcess::NormalExit || decoder.exitCode() != 0)
-                    reader.error = QStringLiteral("FFmpeg 解码失败（退出码 %1）").arg(decoder.exitCode());
-                else if (decoder.bytesAvailable())
-                    reader.error = QStringLiteral("FFmpeg 帧校验报告在行内中断");
-                else if (!reader.frames)
-                    reader.error = QStringLiteral("未解码出完整视频帧");
-            }
-        }
+bool decodeFile(HevcFileDecoder &decoder, const QString &file, int stopAfter,
+                std::optional<DecodedVideoFrame> &previousFirst)
+{
+    std::optional<DecodedVideoFrame> first;
+    bool background = true;
+    const bool started = decoder.start(file, [&](DecodedVideoFrame frame) {
+        background = background && !QThread::isMainThread();
+        auto event = describeFrame(frame);
+        event.insert("event", "frame");
+        writeEvent(event);
+        if (frame.index == stopAfter)
+            decoder.requestStop();
+        if (!first)
+            first = std::move(frame);
+    });
+    if (!started) {
+        writeEvent({{"event", "summary"}, {"file", file}, {"status", "error"}, {"frames", 0},
+                    {"error", QStringLiteral("无法开始后台解码")}, {"diagnostic", ""}});
+        return false;
     }
-    const QString diagnostic = QString::fromUtf8(diagnostics.trimmed());
-    if (!reader.error.isEmpty() && !diagnostic.isEmpty())
-        reader.error += QStringLiteral("：") + diagnostic;
+
+    const auto result = decoder.waitForFinished();
     QString status = QStringLiteral("completed");
-    if (!reader.error.isEmpty())
+    if (!result.error.isEmpty())
         status = QStringLiteral("error");
-    else if (reader.stopped)
+    else if (result.stopped)
         status = QStringLiteral("stopped");
-    else if (!diagnostic.isEmpty())
+    else if (!result.diagnostic.isEmpty())
         status = QStringLiteral("completed_with_errors");
-    writeEvent(output, {{"event", "summary"}, {"file", file}, {"status", status},
-                        {"frames", reader.frames}, {"error", reader.error}, {"diagnostic", diagnostic}});
-    // The probe checks integrity. Even a readable file with a damaged slice fails that check.
-    return reader.error.isEmpty() && diagnostic.isEmpty();
+
+    QJsonObject summary{{"event", "summary"}, {"file", file}, {"status", status},
+                        {"frames", result.frames}, {"error", result.error}, {"diagnostic", result.diagnostic}};
+    // Hash the retained pixels again on the caller thread, after the worker and FFmpeg exit.
+    if (first) {
+        summary.insert("frameCallbacksOffMainThread", background);
+        summary.insert("firstFrameAfterClose", describeFrame(*first));
+    }
+    if (previousFirst)
+        summary.insert("previousFirstFrameAfterClose", describeFrame(*previousFirst));
+    writeEvent(summary);
+    previousFirst = std::move(first);
+    return result.error.isEmpty() && result.diagnostic.isEmpty();
 }
 
 } // namespace
@@ -167,12 +90,11 @@ int main(int argc, char **argv)
     if (files.isEmpty() || (parser.isSet(stopOption) && (!validLimit || stopAfter < 1)))
         parser.showHelp(2);
 
-    QFile output;
-    if (!output.open(stdout, QIODevice::WriteOnly))
-        return 1;
+    HevcFileDecoder decoder;
+    std::optional<DecodedVideoFrame> previousFirst;
     bool passed = true;
     for (const auto &file : files) {
-        if (!decodeFile(file, stopAfter, output))
+        if (!decodeFile(decoder, file, stopAfter, previousFirst))
             passed = false;
     }
     return passed ? 0 : 1;

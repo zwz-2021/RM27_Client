@@ -71,8 +71,19 @@ def derived_clip(ffmpeg, clip, name, *options):
     return derived
 
 
-def run_probe(probe, env, evidence, name, args, expected_statuses, *, expected_exit=None):
-    result = subprocess.run([str(probe), *map(str, args)], capture_output=True, env=env, timeout=45)
+def check_retained_frames(summary, current, previous):
+    if current:
+        check(summary["frameCallbacksOffMainThread"] is True, "A frame callback ran on the caller thread")
+    for field, frames in (("firstFrameAfterClose", current), ("previousFirstFrameAfterClose", previous)):
+        if frames:
+            first = {key: frames[0][key] for key in ("index", "width", "height", "sha256")}
+            check(summary.get(field) == first, f"{field}: retained pixels or metadata changed after close")
+        else:
+            check(field not in summary, f"{field}: retained frame reported for an empty session")
+
+
+def run_probe(probe, env, evidence, name, args, expected_statuses, *, expected_exit=None, timeout=45):
+    result = subprocess.run([str(probe), *map(str, args)], capture_output=True, env=env, timeout=timeout)
     (evidence / f"{name}.jsonl").write_bytes(result.stdout)
     (evidence / f"{name}.stderr.log").write_bytes(result.stderr)
     events = [json.loads(line) for line in result.stdout.splitlines()]
@@ -91,6 +102,7 @@ def run_probe(probe, env, evidence, name, args, expected_statuses, *, expected_e
             elif event["status"] == "completed":
                 check(not event["diagnostic"] and not event["error"],
                       f"{name}: clean completion has a diagnostic: {event}")
+            check_retained_frames(event, current, sessions[-1] if sessions else [])
             summaries.append(event)
             sessions.append(current)
             current = []
@@ -185,6 +197,8 @@ def main():
     parser.add_argument("--probe", type=Path, help="Use this executable with the current runtime PATH")
     parser.add_argument("--ffmpeg", type=Path, help="Fixture encoder and decoder executable")
     parser.add_argument("--ffprobe", type=Path, help="Fixture inspection executable")
+    parser.add_argument("--long-1080p", action="store_true",
+                        help="Also verify over 3 GB of decoded 1080p output using the short lossless fixture")
     args = parser.parse_args()
     env = os.environ.copy()
     if args.probe:
@@ -220,10 +234,6 @@ def main():
                                      ["completed", "error", "error", "completed"])
     for session, hashes in zip(mixed, (expected, [], [], expected)):
         compare_frames(session, hashes)
-    stopped, stopped_summary = run_probe(probe, env, evidence, "stop", ["--stop-after", 3, clip, first],
-                                         ["stopped", "completed"])
-    compare_frames(stopped[0], expected[:3])
-    compare_frames(stopped[1], expected[:1])
     recovery = check_recovery(probe, env, evidence, ffmpeg, ffprobe, clip, expected)
     # Cover long streams and end-of-file without repeatedly encoding a full-size match clip.
     long_run = evidence / "many-frames"
@@ -231,15 +241,32 @@ def main():
     long_clip, long_hashes = make_clip(long_run, ffmpeg, ffprobe, 64, 64, LONG_FRAMES)
     sequence, long_summary = run_probe(probe, env, long_run, "complete", [long_clip], ["completed"])
     compare_frames(sequence[0], long_hashes, width=64, height=64)
+    # Reopen a differently sized picture to distinguish retained data from the new session's storage.
+    small_first = derived_clip(ffmpeg, long_clip, "first-picture.hevc", "-frames:v", "1")
+    stopped, stopped_summary = run_probe(probe, env, evidence, "stop", ["--stop-after", 3, clip, small_first],
+                                         ["stopped", "completed"])
+    compare_frames(stopped[0], expected[:3])
+    compare_frames(stopped[1], long_hashes[:1], width=64, height=64)
+    full_size_summary = None
+    if args.long_1080p:
+        repeats = 1000 // len(expected) + 1  # Cross the historical 1000-frame full-size pipe failure.
+        repeated = evidence / "repeated-1080p60.hevc"
+        repeated.write_bytes(clip.read_bytes() * repeats)
+        full_hashes = expected * repeats
+        full_frames, summaries = run_probe(probe, env, evidence, "long-1080p", [repeated], ["completed"], timeout=135)
+        compare_frames(full_frames[0], full_hashes)
+        full_size_summary = summaries[0]
+        print(f"PASS: all {len(full_hashes)} full-size frames match through EOF, including frames 1000 and 1001.")
     json_file(evidence / "summary.json", {
         "probe": str(probe), "ffmpeg": subprocess.check_output([ffmpeg, "-version"]).splitlines()[0].decode(),
         "knownFrames": FRAMES, "width": WIDTH, "height": HEIGHT, "frameRate": "60/1",
         "complete": valid_summary, "reopen": mixed_summary, "stop": stopped_summary, "manyFrames": long_summary,
-        "sameStreamRecovery": recovery,
+        "sameStreamRecovery": recovery, "long1080p": full_size_summary,
         "allDisplayOrderPixelHashesMatched": True,
     })
     print(f"PASS: {FRAMES} known 1080p60 frames including delayed B pictures, all pixel hashes in order.")
     print("PASS: invalid data, missing VPS/SPS/PPS, same-process reopen and stop after three frames.")
+    print("PASS: callbacks off the caller thread; first-frame pixels intact after stop and a different-size reopen.")
     print(f"PASS: same-stream recovery at output {recovery['firstRecoveredOutputIndex']}, "
           f"all {recovery['matchedRecoveryFrames']} second-segment pixel hashes in order; "
           "terminal damage and missing PPS diagnosed.")
