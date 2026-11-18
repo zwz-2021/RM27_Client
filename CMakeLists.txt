@@ -13,7 +13,7 @@ if(MSVC)
     add_compile_options(/utf-8)
 endif()
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Network Gui Qml Quick QuickControls2)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Network Gui Qml Quick QuickControls2 Multimedia)
 include(cmake/Protobuf.cmake)
 include(cmake/PahoMqtt.cmake)
 include(CTest)

@@ -2,6 +2,7 @@
   <qresource prefix="/RM27/Client">
     <file alias="Main.qml">qml/Main.qml</file>
     <file alias="components/InfoCard.qml">qml/components/InfoCard.qml</file>
+    <file alias="components/SimulationVideoPreview.qml">qml/components/SimulationVideoPreview.qml</file>
     <file alias="pages/OverviewPage.qml">qml/pages/OverviewPage.qml</file>
     <file alias="pages/DiagnosticsPage.qml">qml/pages/DiagnosticsPage.qml</file>
     <file alias="defaults.json">../../configs/defaults.json</file>

@@ -146,7 +146,7 @@ async def verify(configuration, evidence):
 
         async with open_window(config, title, configuration) as window:
             await window.observe("MQTT ready with UDP port occupied", connectionValue="^五类订阅就绪$",
-                                 seatLabel="步兵（只读）")
+                                 seatLabel="步兵（只读）", videoPreviewStatus="视频端口绑定失败")
             await broker.internal_message_broadcast("RobotStaticStatus", bytes.fromhex("20 03 28 03"), qos=1)
             await window.observe("fresh robot identity with UDP port occupied", identityValue=r"\b3\b")
             await broker.internal_message_broadcast("RobotDynamicStatus", bytes.fromhex("08 c1 02"), qos=1)
@@ -158,7 +158,8 @@ async def verify(configuration, evidence):
             await window.observe("first stop", connectionValue="^已停止$")
             blocker.close()
             await window.action("startButton")
-            await window.observe("MQTT ready after manual restart", connectionValue="^五类订阅就绪$")
+            await window.observe("MQTT ready after manual restart", connectionValue="^五类订阅就绪$",
+                                 videoPreviewStatus="^等待模拟画面$")
             await window.action("diagnosticsTab")
             await window.observe("UDP bound with fresh counters", udpBindingLabel=rf"已绑定 127\.0\.0\.1:{port}\b",
                                  udpCountersLabel=r"^有效包 0 · 丢弃 0\b", udpHeaderLabel="尚未收到有效包",

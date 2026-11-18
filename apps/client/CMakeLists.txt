@@ -8,7 +8,7 @@ qt_add_executable(RM27_Client WIN32
 )
 target_link_libraries(RM27_Client PRIVATE
     rm27_config rm27_diagnostics rm27_transport rm27_presentation rm27_protocol
-    Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2
+    Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Multimedia
 )
 target_compile_definitions(RM27_Client PRIVATE
     RM27_VERSION="${PROJECT_VERSION}"
@@ -28,4 +28,15 @@ if(BUILD_TESTING)
     target_link_libraries(RM27_MqttCheck PRIVATE rm27_transport rm27_presentation rm27_config
         Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Test)
     set_target_properties(RM27_MqttCheck PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+    if(RM27_FFMPEG_EXECUTABLE)
+        add_executable(RM27_SimulationFrameDeliveryCheck ../../tests/SimulationFrameDeliveryCheck.cpp
+            SimulationVideoDecode.cpp SimulationVideoDecode.h)
+        target_include_directories(RM27_SimulationFrameDeliveryCheck PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+        target_link_libraries(RM27_SimulationFrameDeliveryCheck PRIVATE rm27_transport Qt6::Multimedia Qt6::Test)
+        set_target_properties(RM27_SimulationFrameDeliveryCheck PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+        add_test(NAME simulation_frame_delivery COMMAND RM27_SimulationFrameDeliveryCheck)
+        get_filename_component(ffmpeg_dir "${RM27_FFMPEG_EXECUTABLE}" DIRECTORY)
+        set_tests_properties(simulation_frame_delivery PROPERTIES TIMEOUT 30 ENVIRONMENT "RM27_TEST_FFMPEG_DIR=${ffmpeg_dir}")
+    endif()
 endif()

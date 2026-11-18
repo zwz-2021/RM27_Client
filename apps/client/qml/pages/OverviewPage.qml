@@ -8,6 +8,7 @@ ScrollView {
   id: root
   objectName: "overviewPage"
   required property ClientViewModel viewModel
+  required property QtObject simulationVideo
   contentWidth: availableWidth
   clip: true
 
@@ -68,6 +69,14 @@ ScrollView {
       text: root.viewModel.actionFeedback
       visible: root.viewModel.infantrySeat && text.length > 0
       wrapMode: Text.Wrap
+    }
+
+    Loader {
+      Layout.fillWidth: true
+      Layout.preferredHeight: Math.min(root.availableWidth * 9 / 16, root.height * 0.52)
+      active: root.simulationVideo !== null && root.viewModel.infantrySeat
+      visible: active
+      sourceComponent: SimulationVideoPreview { simulationVideo: root.simulationVideo }
     }
 
     Frame {

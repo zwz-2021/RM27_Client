@@ -185,8 +185,11 @@ int ClientApplication::run(QGuiApplication &app)
         "RM27.Client", 1, 0, "ClientViewModel", QStringLiteral("由应用组合根创建"));
     QQmlApplicationEngine engine;
     QQmlEngine::setObjectOwnership(&viewModel, QQmlEngine::CppOwnership);
+    if (simulationDecode)
+        QQmlEngine::setObjectOwnership(simulationDecode.get(), QQmlEngine::CppOwnership);
     engine.setInitialProperties({
         {QStringLiteral("viewModel"), QVariant::fromValue(&viewModel)},
+        {QStringLiteral("simulationVideo"), QVariant::fromValue(static_cast<QObject *>(simulationDecode.get()))},
         {QStringLiteral("title"), settings.window.title},
         {QStringLiteral("width"), settings.window.width},
         {QStringLiteral("height"), settings.window.height}

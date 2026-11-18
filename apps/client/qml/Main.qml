@@ -7,6 +7,7 @@ import "pages"
 ApplicationWindow {
   id: root
   required property ClientViewModel viewModel
+  property QtObject simulationVideo: null
   width: 1280
   height: 800
   minimumWidth: 640
@@ -70,7 +71,7 @@ ApplicationWindow {
       Layout.fillWidth: true
       Layout.fillHeight: true
       currentIndex: tabs.currentIndex
-      OverviewPage { viewModel: root.viewModel }
+      OverviewPage { viewModel: root.viewModel; simulationVideo: root.simulationVideo }
       DiagnosticsPage { viewModel: root.viewModel }
     }
     Label {

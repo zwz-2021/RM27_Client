@@ -21,10 +21,20 @@ $closed = Invoke-ProductWindow $ConfigFile $WindowTitle $Configuration $director
                 $controls = Get-Controls
                 foreach ($id in @('connectionValue', 'seatLabel', 'identityValue', 'healthValue',
                                    'udpBindingLabel', 'udpCountersLabel', 'udpHeaderLabel',
-                                   'udpAssemblyLabel', 'udpLastFrameLabel', 'videoDecodeLabel')) {
+                                   'udpAssemblyLabel', 'udpLastFrameLabel', 'videoDecodeLabel', 'videoPreviewStatus')) {
                     if ($controls.ContainsKey($id)) { $view[$id] = $controls[$id].Current.Name }
                 }
                 [Console]::WriteLine((ConvertTo-Json $view -Compress))
+            }
+            'capturePreview' {
+                if (-not (Get-Command Save-PreviewCapture -ErrorAction SilentlyContinue)) {
+                    . (Join-Path $PSScriptRoot 'capture_qt_preview.ps1')
+                }
+                $surface = (Get-Controls)['videoPreviewSurface']
+                if (-not $surface) { throw 'Missing preview surface in the workbench' }
+                $capture = Save-PreviewCapture $client.MainWindowHandle $surface.Current.BoundingRectangle `
+                    (Join-Path $directory 'capture.png')
+                [Console]::WriteLine((ConvertTo-Json $capture -Depth 4 -Compress))
             }
             { $_ -in @('overviewTab', 'diagnosticsTab', 'stopButton', 'startButton', 'saveReceiverButton') } {
                 Invoke-Control $action
