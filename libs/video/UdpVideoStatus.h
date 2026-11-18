@@ -62,6 +62,7 @@ struct UdpVideoStatus {
     quint16 lastSourcePort = 0;
     int lastPacketBytes = 0;
     VideoFrameAssemblyStats assembly;
+    quint64 completedFramesLastSecond = 0;
     std::optional<UdpFrameInfo> lastFrame;
 
     quint64 droppedPackets() const

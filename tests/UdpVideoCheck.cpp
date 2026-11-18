@@ -21,7 +21,7 @@ private slots:
 
 void UdpVideoCheck::oneSecondWindow()
 {
-    rm27::transport::UdpPacketRateWindow window;
+    rm27::transport::OneSecondCountWindow window;
     QCOMPARE(window.countAt(0), 0ULL);
     window.record(10);
     window.record(10);
@@ -170,6 +170,7 @@ void UdpVideoCheck::simulationKeyframeBurst()
     for (int session = 0; session < 2; ++session) {
         QVERIFY(receiver.start(address, port, true));
         port = status.bindPort;
+        QCOMPARE(status.completedFramesLastSecond, 0ULL);
         QVERIFY(status.simulationReceiveBufferBytes.value_or(0) > 0);
 
         // The recording's 202257-byte keyframe takes 145 full fragments plus
@@ -186,8 +187,11 @@ void UdpVideoCheck::simulationKeyframeBurst()
         QTRY_COMPARE(frames.size(), 1);
         QCOMPARE(frames.takeFirst().at(1).toByteArray(), expected);
         QCOMPARE(status.validPackets, 146ULL);
+        QCOMPARE(status.validPacketsLastSecond, 146ULL);
+        QCOMPARE(status.completedFramesLastSecond, 1ULL);
         QCOMPARE(status.assembly.droppedFrames(), 0ULL);
         receiver.stop();
+        QCOMPARE(status.completedFramesLastSecond, 0ULL);
         QVERIFY(!status.simulationReceiveBufferBytes);
     }
 }
@@ -210,8 +214,12 @@ void UdpVideoCheck::assembleSimulationBytes()
     send(first,  "ffff 0001 00000004 00ff");
     send(first,  "ffff 0001 00000004 00ff");
     send(second, "ffff 0000 00000002 11");
+    QTRY_COMPARE(status.validPacketsLastSecond, 3ULL);
+    QCOMPARE(status.completedFramesLastSecond, 0ULL);
     send(first,  "ffff 0000 00000004 abcd");
     QTRY_COMPARE(frames.count(), 1);
+    QCOMPARE(status.validPacketsLastSecond, 4ULL);
+    QCOMPARE(status.completedFramesLastSecond, 1ULL);
     QCOMPARE(frames.at(0).at(0).toUInt(), 65535U);
     QCOMPARE(frames.at(0).at(1).toByteArray(), QByteArray::fromHex("abcd00ff"));
     QCOMPARE(frames.at(0).at(2).toString(), QStringLiteral("127.0.0.1"));
@@ -226,6 +234,7 @@ void UdpVideoCheck::assembleSimulationBytes()
     QCOMPARE(frames.at(2).at(0).toUInt(), 0U);
     QCOMPARE(frames.at(2).at(1).toByteArray(), QByteArray::fromHex("7e"));
     QCOMPARE(status.assembly.completedFrames, 3ULL);
+    QCOMPARE(status.completedFramesLastSecond, 3ULL);
     QCOMPARE(status.assembly.duplicateFragments, 1ULL);
 
     send(first, "000a 0000 00000002 31");
@@ -241,6 +250,9 @@ void UdpVideoCheck::assembleSimulationBytes()
     QCOMPARE(status.assembly.conflictFrames, 2ULL);
     QCOMPARE(status.assembly.pendingFrames, 0);
     QCOMPARE(frames.size(), 3);
+    QCOMPARE(status.completedFramesLastSecond, 3ULL);
+    QTRY_COMPARE(status.completedFramesLastSecond, 0ULL);
+    QCOMPARE(status.assembly.completedFrames, 3ULL);
 }
 
 void UdpVideoCheck::assemblySessionBoundary()
@@ -261,6 +273,7 @@ void UdpVideoCheck::assemblySessionBoundary()
     send("0000 0000 00000001 01");
     QTRY_COMPARE(status.validPackets, 1ULL);
     QCOMPARE(frames.size(), 0);
+    QCOMPARE(status.completedFramesLastSecond, 0ULL);
     QVERIFY(receiver.start(address, port, true));
     send("0010 0000 00000002 aa");
     QTRY_COMPARE(status.assembly.pendingFrames, 1);
@@ -270,6 +283,7 @@ void UdpVideoCheck::assemblySessionBoundary()
     send("0010 0001 00000002 bb");
     QTRY_COMPARE(status.assembly.timeoutFrames, 1ULL); // no further incoming packets
     QCOMPARE(status.assembly.bufferedBytes, 0);
+    QCOMPARE(status.completedFramesLastSecond, 0ULL);
     QCOMPARE(frames.size(), 0);
 }
 

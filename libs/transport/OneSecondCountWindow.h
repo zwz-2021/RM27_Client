@@ -5,9 +5,8 @@
 
 namespace rm27::transport {
 
-// Use nondecreasing local milliseconds. Grouping arrivals in the same millisecond
-// keeps at most 1000 buckets, independent of the packet rate.
-class UdpPacketRateWindow {
+// Group events by monotonic millisecond to keep at most 1000 buckets.
+class OneSecondCountWindow {
 public:
     quint64 record(qint64 nowMs)
     {

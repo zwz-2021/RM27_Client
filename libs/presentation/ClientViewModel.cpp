@@ -172,6 +172,16 @@ QString ClientViewModel::udpPacketRateText() const
     return QStringLiteral("最近 1 秒有效 UDP 收包：%1").arg(rate);
 }
 
+QString ClientViewModel::udpFrameRateText() const
+{
+    if (mode_ != domain::RunMode::Simulation)
+        return {};
+    const QString rate = udpStatus_.state == video::UdpVideoState::Bound
+        ? QStringLiteral("%1 帧/秒").arg(udpStatus_.completedFramesLastSecond)
+        : missing;
+    return QStringLiteral("最近 1 秒完整组帧：%1").arg(rate);
+}
+
 QString ClientViewModel::udpHeaderText() const
 {
     if (!udpStatus_.lastHeader) return QStringLiteral("尚未收到有效包");

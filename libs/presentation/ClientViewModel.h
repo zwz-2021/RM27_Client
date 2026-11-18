@@ -40,6 +40,7 @@ class ClientViewModel : public QObject {
     Q_PROPERTY(QString udpBindingText READ udpBindingText NOTIFY udpChanged)
     Q_PROPERTY(QString udpCountersText READ udpCountersText NOTIFY udpChanged)
     Q_PROPERTY(QString udpPacketRateText READ udpPacketRateText NOTIFY udpChanged)
+    Q_PROPERTY(QString udpFrameRateText READ udpFrameRateText NOTIFY udpChanged)
     Q_PROPERTY(QString udpPacketAgeText READ udpPacketAgeText NOTIFY udpPacketAgeChanged)
     Q_PROPERTY(QString udpHeaderText READ udpHeaderText NOTIFY udpChanged)
     Q_PROPERTY(QString udpAssemblyText READ udpAssemblyText NOTIFY udpChanged)
@@ -87,6 +88,7 @@ public:
     QString udpBindingText() const;
     QString udpCountersText() const;
     QString udpPacketRateText() const;
+    QString udpFrameRateText() const;
     QString udpPacketAgeText() const;
     QString udpHeaderText() const;
     QString udpAssemblyText() const;

@@ -24,9 +24,10 @@ UdpVideoReceiver::UdpVideoReceiver(QObject *parent)
     connect(socket_, &QUdpSocket::readyRead, this, &UdpVideoReceiver::drain);
     connect(&continuation_, &QTimer::timeout, this, &UdpVideoReceiver::drain);
     connect(&notification_, &QTimer::timeout, this, [this] {
-        status_.validPacketsLastSecond = packetRate_.countAt(sessionClock_.elapsed());
-        // Refresh through silence until the final packet ages out.
-        if (status_.validPacketsLastSecond != 0)
+        const auto nowMs = sessionClock_.elapsed();
+        status_.validPacketsLastSecond = packetRate_.countAt(nowMs);
+        status_.completedFramesLastSecond = frameRate_.countAt(nowMs);
+        if (status_.validPacketsLastSecond != 0 || status_.completedFramesLastSecond != 0)
             notification_.start();
         emit statusChanged();
     });
@@ -91,6 +92,8 @@ void UdpVideoReceiver::closeSocket()
     status_.lastValidPacketAt.invalidate();
     packetRate_.clear();
     status_.validPacketsLastSecond = 0;
+    frameRate_.clear();
+    status_.completedFramesLastSecond = 0;
     assembleLocalSimulation_ = false;
     assembler_.reset();
     status_.assembly.pendingFrames = 0;
@@ -171,6 +174,7 @@ void UdpVideoReceiver::drain()
                     QByteArrayView(bytes + video::VideoHeaderBytes, length - video::VideoHeaderBytes), sessionClock_.elapsed());
                 status_.assembly = assembler_.stats();
                 if (frame) {
+                    status_.completedFramesLastSecond = frameRate_.record(sessionClock_.elapsed());
                     status_.lastFrame = video::UdpFrameInfo{header.frameId, frame->size(), address, senderPort};
                     emit frameAssembled(header.frameId, *frame, address, senderPort);
                 }

@@ -136,6 +136,10 @@ async def check_loss_series(window, sender, port, red_count, frame, red_packets,
         await window.observe("eight simultaneous incomplete frames retained at the local budget",
                              udpAssemblyLabel=rf"(?s)完整帧 {red_count} · .*在途 8 帧 · 缓存 {peak_bytes} 字节（{peak_fragments} 片）",
                              udpLastFrameLabel=rf"帧号 {red_count - 1} ·")
+        await window.observe("fragments still arriving after the last complete red frame ages out",
+                             udpPacketRateLabel=r"^最近 1 秒有效 UDP 收包：[1-9]\d* 包/秒$",
+                             udpFrameRateLabel="^最近 1 秒完整组帧：0 帧/秒$",
+                             udpAssemblyLabel=rf"完整帧 {red_count}\b")
         await window.action("overviewTab")
         captures.append(await check_stale_red(window, set_health))
         require(not transfer.done(), "The loss series ended before the stale preview and new MQTT value were observed")
@@ -198,6 +202,7 @@ async def check_reordered_start(window, sender, port, red_count, red_packets, bl
     await asyncio.sleep(1.5)
     silent_view = await window.observe("UDP stays silent while new MQTT health reaches the same window",
                                        udpPacketRateLabel="^最近 1 秒有效 UDP 收包：0 包/秒$",
+                                       udpFrameRateLabel="^最近 1 秒完整组帧：0 帧/秒$",
                                        udpCountersLabel=rf"^有效包 {red_packets} · 丢弃 0\b")
     silent_age = packet_age_seconds(silent_view)
     require(silent_age >= red_age + 1.0, f"Packet age did not advance during silence: {red_age} -> {silent_age}")
@@ -223,6 +228,7 @@ async def check_reordered_start(window, sender, port, red_count, red_packets, bl
     return {"damagedFrames": 0, "assemblyTimeouts": 0, "assemblyOverBudget": 0,
             "localPacketAgeSeconds": {"afterRed": red_age, "duringSilence": silent_age, "afterBlue": blue_age},
             "packetRateDuringSilence": silent_view["udpPacketRateLabel"],
+            "completeFrameRateDuringSilence": silent_view["udpFrameRateLabel"],
             "firstReorderedFrameId": red_count, "blueFramesBeforeNextKeyframe": len(blue)}, red_packets + blue_packets
 
 

@@ -34,12 +34,26 @@ ScrollView {
           text: root.viewModel.udpCountersText
           wrapMode: Text.Wrap
         }
-        Label {
-          objectName: "udpPacketRateLabel"
+        RowLayout {
           Layout.fillWidth: true
-          text: root.viewModel.udpPacketRateText
-          visible: text.length > 0
-          wrapMode: Text.Wrap
+          visible: packetRate.text.length > 0 || frameRate.text.length > 0
+          spacing: 16
+          Label {
+            id: packetRate
+            objectName: "udpPacketRateLabel"
+            text: root.viewModel.udpPacketRateText
+            visible: text.length > 0
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+          }
+          Label {
+            id: frameRate
+            objectName: "udpFrameRateLabel"
+            text: root.viewModel.udpFrameRateText
+            visible: text.length > 0
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+          }
         }
         Label {
           objectName: "udpPacketAgeLabel"
