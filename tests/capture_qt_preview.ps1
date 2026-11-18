@@ -1,5 +1,5 @@
 #requires -Version 5.1
-# Capture only the test process's HWND and save only the accessible preview region.
+# Capture the test process's HWND for a preview crop or a diagnostics screenshot.
 Add-Type -AssemblyName System.Drawing
 Add-Type -Namespace RM27 -Name PreviewCapture -MemberDefinition @'
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
@@ -16,7 +16,7 @@ Add-Type -Namespace RM27 -Name PreviewCapture -MemberDefinition @'
     public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
 '@
 
-function Save-PreviewCapture([IntPtr]$Handle, [string]$Destination) {
+function Save-PreviewCapture([IntPtr]$Handle, [string]$Destination, [switch]$WholeWindow) {
     # UI Automation supplies physical screen coordinates even on a scaled display.
     $oldContext = [RM27.PreviewCapture]::SetThreadDpiAwarenessContext([IntPtr](-4))
     $window = $graphics = $preview = $null
@@ -28,6 +28,10 @@ function Save-PreviewCapture([IntPtr]$Handle, [string]$Destination) {
             if ([RM27.PreviewCapture]::IsIconic($Handle)) {
                 [void][RM27.PreviewCapture]::ShowWindowAsync($Handle, 9) # SW_RESTORE
             }
+            if (-not [RM27.PreviewCapture]::GetWindowRect($Handle, [ref]$bounds)) { throw 'No HWND bounds' }
+            $width = $bounds.Right - $bounds.Left
+            $height = $bounds.Bottom - $bounds.Top
+            if ($WholeWindow -and -not [RM27.PreviewCapture]::IsIconic($Handle) -and $width -gt 0 -and $height -gt 0) { break }
             # Qt can replace or reposition the preview when switching back to the workbench.
             $area = $null
             try {
@@ -36,9 +40,6 @@ function Save-PreviewCapture([IntPtr]$Handle, [string]$Destination) {
             } catch [System.Windows.Automation.ElementNotAvailableException], [Runtime.InteropServices.COMException] {
                 # Query the replacement element on the next iteration.
             }
-            if (-not [RM27.PreviewCapture]::GetWindowRect($Handle, [ref]$bounds)) { throw 'No HWND bounds' }
-            $width = $bounds.Right - $bounds.Left
-            $height = $bounds.Bottom - $bounds.Top
             if ($area -and -not $area.IsEmpty -and $area.Width -gt 0 -and $area.Height -gt 0) {
                 $rect = [Drawing.Rectangle]::new([Math]::Round($area.X - $bounds.Left),
                     [Math]::Round($area.Y - $bounds.Top), [Math]::Round($area.Width), [Math]::Round($area.Height))
@@ -57,6 +58,10 @@ function Save-PreviewCapture([IntPtr]$Handle, [string]$Destination) {
             if (-not [RM27.PreviewCapture]::PrintWindow($Handle, $dc, 2)) { throw 'Window capture failed' }
         } finally { $graphics.ReleaseHdc($dc) }
 
+        if ($WholeWindow) {
+            $window.Save($Destination, [Drawing.Imaging.ImageFormat]::Png)
+            return @{ width = $width; height = $height }
+        }
         try { $preview = $window.Clone($rect, $window.PixelFormat) }
         catch { throw "Preview capture failed for $rect on ${width}x${height}: $($_.Exception.Message)" }
         $preview.Save($Destination, [Drawing.Imaging.ImageFormat]::Png)

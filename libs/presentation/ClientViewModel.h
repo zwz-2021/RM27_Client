@@ -6,6 +6,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QTimer>
 #include <QVariantMap>
 #include <QVariantList>
 #include <functional>
@@ -38,6 +39,7 @@ class ClientViewModel : public QObject {
     Q_PROPERTY(QString diagnosticText READ diagnosticText NOTIFY diagnosticChanged)
     Q_PROPERTY(QString udpBindingText READ udpBindingText NOTIFY udpChanged)
     Q_PROPERTY(QString udpCountersText READ udpCountersText NOTIFY udpChanged)
+    Q_PROPERTY(QString udpPacketAgeText READ udpPacketAgeText NOTIFY udpPacketAgeChanged)
     Q_PROPERTY(QString udpHeaderText READ udpHeaderText NOTIFY udpChanged)
     Q_PROPERTY(QString udpAssemblyText READ udpAssemblyText NOTIFY udpChanged)
     Q_PROPERTY(QString udpLastFrameText READ udpLastFrameText NOTIFY udpChanged)
@@ -83,6 +85,7 @@ public:
     void setUdpStatus(const video::UdpVideoStatus &status);
     QString udpBindingText() const;
     QString udpCountersText() const;
+    QString udpPacketAgeText() const;
     QString udpHeaderText() const;
     QString udpAssemblyText() const;
     QString udpLastFrameText() const;
@@ -114,6 +117,7 @@ signals:
     void basicStateChanged();
     void diagnosticChanged();
     void udpChanged();
+    void udpPacketAgeChanged();
     void videoDecodeChanged();
     void identityChanged();
     void actionFeedbackChanged();
@@ -129,6 +133,7 @@ private:
     std::function<QString(int)> saveConfig_;
     QString configFeedback_;
     video::UdpVideoStatus udpStatus_;
+    QTimer udpPacketAgeRefresh_;
     QString videoDecodeText_;
 };
 

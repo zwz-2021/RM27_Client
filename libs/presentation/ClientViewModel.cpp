@@ -104,12 +104,20 @@ ClientViewModel::ClientViewModel(application::ClientSession &session,
             this, &ClientViewModel::identityChanged);
     connect(&session_, &application::ClientSession::actionFeedbackChanged,
             this, &ClientViewModel::actionFeedbackChanged);
+    udpPacketAgeRefresh_.setInterval(200);
+    connect(&udpPacketAgeRefresh_, &QTimer::timeout, this, &ClientViewModel::udpPacketAgeChanged);
 }
 
 void ClientViewModel::setUdpStatus(const video::UdpVideoStatus &status)
 {
     udpStatus_ = status;
+    // Packet notifications refresh the label during traffic. Keep it ticking through silence.
+    if (mode_ == domain::RunMode::Simulation && status.lastValidPacketAt.isValid())
+        udpPacketAgeRefresh_.start();
+    else
+        udpPacketAgeRefresh_.stop();
     emit udpChanged();
+    emit udpPacketAgeChanged();
 }
 
 void ClientViewModel::setVideoDecodeText(const QString &text)
@@ -161,6 +169,18 @@ QString ClientViewModel::udpHeaderText() const
     return QStringLiteral("最近有效包 · 来源 %1:%2 · 整包 %3 字节 · 帧号 %4 · 分片号 %5 · 整帧 %6 字节")
         .arg(udpStatus_.lastSourceAddress).arg(udpStatus_.lastSourcePort).arg(udpStatus_.lastPacketBytes)
         .arg(header.frameId).arg(header.fragmentIndex).arg(header.frameBytes);
+}
+
+QString ClientViewModel::udpPacketAgeText() const
+{
+    if (mode_ != domain::RunMode::Simulation)
+        return {};
+    if (udpStatus_.state != video::UdpVideoState::Bound)
+        return missing;
+    if (!udpStatus_.lastValidPacketAt.isValid())
+        return QStringLiteral("等待本会话首个有效 UDP 包");
+    return QStringLiteral("距最近有效 UDP 包 %1 秒（本机接收）")
+        .arg(udpStatus_.lastValidPacketAt.elapsed() / 1000.0, 0, 'f', 1);
 }
 
 QString ClientViewModel::udpAssemblyText() const

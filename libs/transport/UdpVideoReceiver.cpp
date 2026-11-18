@@ -82,6 +82,7 @@ void UdpVideoReceiver::closeSocket()
     continuation_.stop();
     notification_.stop();
     expiry_.stop();
+    status_.lastValidPacketAt.invalidate();
     assembleLocalSimulation_ = false;
     assembler_.reset();
     status_.assembly.pendingFrames = 0;
@@ -149,6 +150,7 @@ void UdpVideoReceiver::drain()
                 ++status_.inconsistentFramePackets;
             } else {
                 ++status_.validPackets;
+                status_.lastValidPacketAt.start();
                 status_.lastHeader = header;
                 status_.lastSourceAddress = address;
                 status_.lastSourcePort = senderPort;

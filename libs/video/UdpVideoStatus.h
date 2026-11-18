@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QElapsedTimer>
 #include <QString>
 #include <optional>
 
@@ -54,6 +55,7 @@ struct UdpVideoStatus {
     quint64 oversizedPackets = 0;
     quint64 emptyPayloadPackets = 0;
     quint64 inconsistentFramePackets = 0;
+    QElapsedTimer lastValidPacketAt;
     std::optional<UdpVideoHeader> lastHeader;
     QString lastSourceAddress;
     quint16 lastSourcePort = 0;

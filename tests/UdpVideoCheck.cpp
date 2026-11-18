@@ -41,7 +41,7 @@ void UdpVideoCheck::wireSamples()
     QCOMPARE(s.oversizedPackets, 2ULL);
     QCOMPARE(s.emptyPayloadPackets, 1ULL);
     QCOMPARE(s.inconsistentFramePackets, 1ULL);
-    QVERIFY(!s.lastHeader && !s.validPackets);
+    QVERIFY(!s.lastHeader && !s.validPackets && !s.lastValidPacketAt.isValid());
 
     // Literal network bytes independent of the simulator. An untrusted frame length
     // is reported verbatim and must never cause an allocation at the header stage.
@@ -54,10 +54,15 @@ void UdpVideoCheck::wireSamples()
     QCOMPARE(s.lastSourceAddress, QStringLiteral("127.0.0.1"));
     QCOMPARE(s.lastSourcePort, sender.localPort());
     QCOMPARE(s.lastPacketBytes, 1400);
-    send(QByteArray::fromHex("0000000000000001ab"));
+    const auto firstPacketAt = s.lastValidPacketAt;
+    QVERIFY(firstPacketAt.isValid());
+    QTRY_VERIFY(firstPacketAt.elapsed() >= 1);
     send(QByteArray(3, 'x'));
     QTRY_COMPARE(s.shortPackets, 9ULL);
-    QCOMPARE(s.validPackets, 2ULL);
+    QVERIFY(s.lastValidPacketAt == firstPacketAt);
+    send(QByteArray::fromHex("0000000000000001ab"));
+    QTRY_COMPARE(s.validPackets, 2ULL);
+    QVERIFY(firstPacketAt.msecsTo(s.lastValidPacketAt) > 0);
     QCOMPARE(s.lastHeader->frameId, 0);
     QCOMPARE(s.lastHeader->fragmentIndex, 0);
     QCOMPARE(s.lastHeader->frameBytes, 1U);
@@ -91,9 +96,11 @@ void UdpVideoCheck::exclusiveBindAndRestart()
     receiver.stop(); // a datagram is still queued in the old socket
     receiver.stop();
     QVERIFY(s.state == UdpVideoState::Stopped && !s.lastHeader && s.lastSourceAddress.isEmpty() && !s.validPackets);
+    QVERIFY(!s.lastValidPacketAt.isValid());
     QVERIFY(holder.bind(QHostAddress::LocalHost, port, QAbstractSocket::DontShareAddress));
     holder.close();
     QVERIFY(receiver.start(address, port));
+    QVERIFY(!s.lastValidPacketAt.isValid());
     QCOMPARE(sender.writeDatagram(one, QHostAddress::LocalHost, port), one.size());
     QTRY_COMPARE(s.validPackets, 1ULL);
     QCOMPARE(s.droppedPackets(), 0ULL);

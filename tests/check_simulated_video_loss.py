@@ -8,6 +8,7 @@ from datetime import datetime
 import re
 import socket
 import sys
+import time
 import traceback
 import uuid
 
@@ -89,15 +90,17 @@ async def expect_drained(window, description, packets, assembled, decoded, last_
     await window.action("diagnosticsTab")
     # A recovered segment can retain an FFmpeg diagnostic from before its first decodable frame.
     detail = r"\n解码错误 · [^\n]+" if failed else r"(?:\nFFmpeg 最近诊断 · [^\n]+)?$"
-    await window.observe(description, udpCountersLabel=rf"^有效包 {packets} · 丢弃 0\b",
-                         udpLastFrameLabel=rf"帧号 {last_frame} · .*来源 127\.0\.0\.1:{source_port}\b",
-                         udpAssemblyLabel=rf"(?s)完整帧 {assembled} · 丢帧 {timeouts + over_budget}"
-                                          rf"（超时 {timeouts} · 冲突 0 · 超出预算 {over_budget}）"
-                                          r".*在途 0 帧 · 缓存 0 字节（0 片）",
-                         videoDecodeLabel=rf"等待输入 · 已解码 {decoded} 帧 · 1920×1080"
-                                          r" · 排队 0 帧 / 0 字节 · 输入丢弃 0 帧" + detail,
-                         **({"udpHeaderLabel": header} if header else {}))
+    view = await window.observe(
+        description, udpCountersLabel=rf"^有效包 {packets} · 丢弃 0\b",
+        udpLastFrameLabel=rf"帧号 {last_frame} · .*来源 127\.0\.0\.1:{source_port}\b",
+        udpAssemblyLabel=rf"(?s)完整帧 {assembled} · 丢帧 {timeouts + over_budget}"
+                         rf"（超时 {timeouts} · 冲突 0 · 超出预算 {over_budget}）"
+                         r".*在途 0 帧 · 缓存 0 字节（0 片）",
+        videoDecodeLabel=rf"等待输入 · 已解码 {decoded} 帧 · 1920×1080"
+                         r" · 排队 0 帧 / 0 字节 · 输入丢弃 0 帧" + detail,
+        **({"udpHeaderLabel": header} if header else {}))
     await window.action("overviewTab")
+    return view
 
 
 async def expect_waiting(window, description, capture_name, decoded):
@@ -178,24 +181,46 @@ async def check_missing_start(window, sender, port, red_count, blue, plain, red_
             "waitingQueueSamples": {"first": first_queue}}, received
 
 
+def packet_age_seconds(view):
+    text = view.get("udpPacketAgeLabel", "")
+    match = re.fullmatch(r"距最近有效 UDP 包 (\d+\.\d) 秒（本机接收）", text)
+    require(match, f"Expected a local UDP packet age in the diagnostics tab: {text!r}")
+    return float(match[1])
+
+
 async def check_reordered_start(window, sender, port, red_count, red_packets, blue, set_health, captures):
     source_port = sender.getsockname()[1]
-    await expect_drained(window, "red recording drained before the silent interval", red_packets,
-                         red_count, red_count, red_count - 1, source_port, timeouts=0)
+    red_view = await expect_drained(window, "red recording drained before the silent interval", red_packets,
+                                    red_count, red_count, red_count - 1, source_port, timeouts=0)
+    red_age = packet_age_seconds(red_view)
     captures.append(await check_stale_red(window, set_health))
+    await window.action("diagnosticsTab")
+    await asyncio.sleep(1.5)
+    silent_view = await window.observe("UDP stays silent while new MQTT health reaches the same window",
+                                       udpCountersLabel=rf"^有效包 {red_packets} · 丢弃 0\b")
+    silent_age = packet_age_seconds(silent_view)
+    require(silent_age >= red_age + 1.0, f"Packet age did not advance during silence: {red_age} -> {silent_age}")
+    await window.action("captureDiagnostics")
+    await window.action("overviewTab")
 
     # Stop after one recording: a later loop's IDR must not rescue a broken first frame.
     dependent_frames(blue)
     blue_packets = sum((len(frame) + 1391) // 1392 for frame in blue)
+    resumed_at = time.monotonic()
     async with sending(send_clip, sender, port, red_count, blue, reverse_first=True) as restored:
         await window.observe("reordered recording playing before a second keyframe is sent",
                              videoPreviewStatus="^正在播放$")
         captures.append(await expect_pixels(window, "first-reordered-blue", [[BLUE] * 4]))
     require(restored.result() == blue_packets, "Unexpected packet count in the reordered recording")
     assembled = red_count + len(blue)
-    await expect_drained(window, "all pictures from the first blue recording decoded before another IDR",
-                         red_packets + blue_packets, assembled, assembled, assembled - 1, source_port, timeouts=0)
+    blue_view = await expect_drained(window, "all pictures from the first blue recording decoded before another IDR",
+                                     red_packets + blue_packets, assembled, assembled, assembled - 1,
+                                     source_port, timeouts=0)
+    blue_age = packet_age_seconds(blue_view)
+    # Reading the UI can itself take time. The last blue packet cannot predate the first one.
+    require(blue_age <= time.monotonic() - resumed_at + 0.3, f"Old packet age survived blue recovery: {blue_age}")
     return {"damagedFrames": 0, "assemblyTimeouts": 0, "assemblyOverBudget": 0,
+            "localPacketAgeSeconds": {"afterRed": red_age, "duringSilence": silent_age, "afterBlue": blue_age},
             "firstReorderedFrameId": red_count, "blueFramesBeforeNextKeyframe": len(blue)}, red_packets + blue_packets
 
 

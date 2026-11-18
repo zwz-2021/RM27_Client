@@ -20,17 +20,21 @@ $closed = Invoke-ProductWindow $ConfigFile $WindowTitle $Configuration $director
                 $view = @{}
                 $controls = Get-Controls
                 foreach ($id in @('connectionValue', 'seatLabel', 'identityValue', 'healthValue',
-                                   'udpBindingLabel', 'udpCountersLabel', 'udpHeaderLabel',
+                                   'udpBindingLabel', 'udpCountersLabel', 'udpHeaderLabel', 'udpPacketAgeLabel',
                                    'udpAssemblyLabel', 'udpLastFrameLabel', 'videoDecodeLabel', 'videoPreviewStatus')) {
                     if ($controls.ContainsKey($id)) { $view[$id] = $controls[$id].Current.Name }
                 }
                 [Console]::WriteLine((ConvertTo-Json $view -Compress))
             }
-            'capturePreview' {
+            { $_ -in @('capturePreview', 'captureDiagnostics') } {
                 if (-not (Get-Command Save-PreviewCapture -ErrorAction SilentlyContinue)) {
                     . (Join-Path $PSScriptRoot 'capture_qt_preview.ps1')
                 }
-                $capture = Save-PreviewCapture $client.MainWindowHandle (Join-Path $directory 'capture.png')
+                if ($action -eq 'captureDiagnostics') {
+                    $capture = Save-PreviewCapture $client.MainWindowHandle (Join-Path $directory 'udp-silence.png') -WholeWindow
+                } else {
+                    $capture = Save-PreviewCapture $client.MainWindowHandle (Join-Path $directory 'capture.png')
+                }
                 [Console]::WriteLine((ConvertTo-Json $capture -Depth 4 -Compress))
             }
             { $_ -in @('overviewTab', 'diagnosticsTab', 'stopButton', 'startButton', 'saveReceiverButton') } {

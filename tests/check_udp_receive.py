@@ -163,6 +163,7 @@ async def verify(configuration, evidence):
             await window.action("diagnosticsTab")
             await window.observe("UDP bound with fresh counters", udpBindingLabel=rf"已绑定 127\.0\.0\.1:{port}\b",
                                  udpCountersLabel=r"^有效包 0 · 丢弃 0\b", udpHeaderLabel="尚未收到有效包",
+                                 udpPacketAgeLabel="^等待本会话首个有效 UDP 包$",
                                  udpAssemblyLabel=r"完整帧 0\b", udpLastFrameLabel="尚未收到完整帧")
 
             with exclusive_udp(0) as sender:
@@ -205,6 +206,7 @@ async def verify(configuration, evidence):
                 await window.action("diagnosticsTab")
                 await window.observe("UDP released and last header cleared", udpBindingLabel="已停止",
                                      udpHeaderLabel="尚未收到有效包", udpCountersLabel=r"^有效包 0 · 丢弃 0\b",
+                                     udpPacketAgeLabel="^—$",
                                      udpAssemblyLabel=r"(?s)完整帧 0\b.*超时 0\b.*在途 0 帧.*缓存 0 字节",
                                      udpLastFrameLabel="尚未收到完整帧")
             await window.action("overviewTab")
@@ -212,6 +214,7 @@ async def verify(configuration, evidence):
             await window.action("diagnosticsTab")
             await window.observe("new session without old data", udpBindingLabel=rf"已绑定 127\.0\.0\.1:{port}\b",
                                  udpCountersLabel=r"^有效包 0 · 丢弃 0\b", udpHeaderLabel="尚未收到有效包",
+                                 udpPacketAgeLabel="^等待本会话首个有效 UDP 包$",
                                  udpAssemblyLabel=r"完整帧 0\b", udpLastFrameLabel="尚未收到完整帧")
             await check_assembly(window, target)
 
