@@ -18,7 +18,7 @@ from simulator.server.hevc_annexb import HevcAnnexBFrameExtractor
 from simulator.server.video_datagrams import send_video_frame
 from simulator.server.video_streamer import VideoStreamer
 from simulator.tools.video_sender import send_video_as_hevc_udp
-from simulator.tools.video_loss_demo import make_clip, send_clip, send_incomplete
+from simulator.tools.video_loss_demo import dependent_frames, make_clip, send_clip, send_incomplete
 
 
 def check(condition, message):
@@ -48,18 +48,30 @@ def check_loss_demo(capture):
         # Annex B start codes end in 00 00 01. Look inside the actual first AU.
         types = [(m[1][0] >> 1) & 63 for m in re.finditer(b"\x00\x00\x01(.)", clip[0], re.DOTALL)]
         check(types[:3] == [32, 33, 34] and any(t in (19, 20) for t in types), f"Missing VPS/SPS/PPS/IDR: {types}")
+    ordinary = dependent_frames(blue)
+    check(ordinary == blue[1:], "Expected the original recording with only its first AU removed")
+    # Ask an independent decoder what a fresh reader can display, with and without the first AU.
+    decode = ["ffmpeg", "-hide_banner", "-v", "error", "-f", "hevc", "-i", "pipe:0", "-map", "0:v:0",
+              "-vf", "scale=1:1", "-pix_fmt", "rgb24", "-fps_mode", "passthrough", "-f", "rawvideo", "pipe:1"]
+    missing_start = subprocess.run(decode, input=b"".join(ordinary), capture_output=True, timeout=20)
+    check(not missing_start.stdout, "A fresh decoder displayed a picture without the starting AU")
+    complete = subprocess.run(decode, input=b"".join(blue), capture_output=True, check=True, timeout=20)
+    pixels = list(zip(complete.stdout[::3], complete.stdout[1::3], complete.stdout[2::3]))
+    check(len(complete.stdout) == 3 * len(blue) and all(b > 225 and max(r, g) < 30 for r, g, b in pixels),
+          f"Expected {len(blue)} blue pictures from the complete recording")
     port = capture.getsockname()[1]
     damaged_id = len(red)
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         before = send_clip(sock, port, 0, red)
         fault = send_incomplete(sock, port, damaged_id, blue[0])
-        after = send_clip(sock, port, damaged_id + 1, blue)
+        waiting = send_clip(sock, port, damaged_id + 1, ordinary)
+        after = send_clip(sock, port, damaged_id + 1 + len(ordinary), blue)
         source_port = sock.getsockname()[1]
 
     # Derive the sequence and header bytes from the published layout directly,
     # including the one gap inside the damaged frame and its full original size.
     packet_count = 0
-    for frame_id, frame in enumerate([*red, blue[0], *blue]):
+    for frame_id, frame in enumerate([*red, blue[0], *ordinary, *blue]):
         for index, offset in enumerate(range(0, len(frame), 1392)):
             if frame_id == damaged_id and index == 1:
                 continue
@@ -71,10 +83,11 @@ def check_loss_demo(capture):
     slices = (len(blue[0]) + 1391) // 1392
     check(fault == {"frameId": damaged_id, "frameBytes": len(blue[0]), "sliceCount": slices,
                     "omittedSlice": 1, "sentPackets": slices - 1}, f"Incorrect loss report: {fault}")
-    check(packet_count == before + slices - 1 + after, "Loss demo packet counts changed")
+    check(packet_count == before + slices - 1 + waiting + after, "Loss demo packet counts changed")
     print(f"Loss demo: {len(red)} red frames, frame {damaged_id} missing only slice 1/{slices} "
-          f"({len(blue[0])} bytes), {len(blue)} blue frames; {packet_count} exact datagrams, one source. "
-          "Both clips begin with VPS/SPS/PPS/IDR.")
+          f"({len(blue[0])} bytes), {len(ordinary)} dependent AUs, {len(blue)} blue frames; "
+          f"{packet_count} exact datagrams, one source. Both clips begin with VPS/SPS/PPS/IDR. "
+          f"Fresh FFmpeg decoded 0 pictures from dependent AUs and {len(pixels)} from the full blue clip.")
 
 
 def check_incremental_extractor():

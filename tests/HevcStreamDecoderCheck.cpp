@@ -10,6 +10,7 @@
 
 using rm27::video::DecodedVideoFrame;
 using rm27::video::HevcStreamDecoder;
+using rm27::video::HevcStreamPhase;
 
 namespace {
 // One independently encoded, white 32x32 4:2:0 picture with its parameter sets.
@@ -17,6 +18,8 @@ const QByteArray WhitePicture = QByteArray::fromHex(
     "0000000140010c01ffff01600000030090000003000003001e928090"
     "0000000142010101600000030090000003000003001ea042085964ab932bc05a020000030002000003007810"
     "000000014401c173d0890000012801af0a60f1e5f4aeeed5b0");
+// The next picture from the same encoded sequence (TRAIL_R, without headers).
+const QByteArray DependentWhitePicture = QByteArray::fromHex("000000010201d0097e10c614c0fbac");
 }
 
 class HevcStreamDecoderCheck final : public QObject {
@@ -26,6 +29,7 @@ private slots:
     void boundedWhileConsumerIsBusy_data();
     void boundedWhileConsumerIsBusy();
     void failedSegmentThenRestart();
+    void dependentPicturesThenKeyframeWithoutPause();
     void missingDecoderReportsRejectedInput();
     void stalledChildAfterEndOfInput();
 };
@@ -75,7 +79,7 @@ void HevcStreamDecoderCheck::boundedWhileConsumerIsBusy()
     QCOMPARE(full.pendingBytes, accepted * unitBytes);
     QCOMPARE(full.droppedFrames, 3ULL);
     QCOMPARE(full.decodedFrames, 1ULL);
-    QVERIFY(full.segmentActive);
+    QCOMPARE(full.phase, HevcStreamPhase::Decoding);
 
     // Keep the consumer blocked until the owner has discarded the entire waiting queue.
     auto unblock = std::unique_ptr<QThread>(QThread::create([&] {
@@ -89,7 +93,7 @@ void HevcStreamDecoderCheck::boundedWhileConsumerIsBusy()
     QCOMPARE(stopped.decodedFrames, 1ULL);
     QCOMPARE(stopped.droppedFrames, 3ULL);
     QCOMPARE(stopped.pendingBytes, 0);
-    QVERIFY(!stopped.segmentActive);
+    QCOMPARE(stopped.phase, HevcStreamPhase::Idle);
     QCOMPARE(decoder.status().decodedFrames, 0ULL);
     QVERIFY(!decoder.submit(WhitePicture));
 }
@@ -109,12 +113,19 @@ void HevcStreamDecoderCheck::failedSegmentThenRestart()
     QVERIFY(decoder.submit(QByteArray(100, 'x')));
     QTRY_VERIFY_WITH_TIMEOUT(!decoder.status().error.isEmpty(), 5000);
     auto failed = decoder.status();
-    QVERIFY(!failed.segmentActive);
+    QCOMPARE(failed.phase, HevcStreamPhase::Idle);
     QCOMPARE(failed.decodedFrames, 0ULL);
+    QVERIFY(decoder.submit(DependentWhitePicture));
+    QTRY_COMPARE_WITH_TIMEOUT(decoder.status().phase, HevcStreamPhase::WaitingForPicture, 5000);
+    const auto retrying = decoder.status();
+    QVERIFY(retrying.error.isEmpty());
+    QCOMPARE(retrying.decodedFrames, 0ULL);
+    // End the failed retry so the next segment also verifies a clean diagnostic history.
+    QTRY_VERIFY_WITH_TIMEOUT(!decoder.status().error.isEmpty(), 5000);
     QVERIFY(decoder.submit(WhitePicture));
     QVERIFY(picture.tryAcquire(1, 5000));
     QCOMPARE(index, 1);
-    QTRY_VERIFY_WITH_TIMEOUT(!decoder.status().segmentActive, 5000);
+    QTRY_COMPARE_WITH_TIMEOUT(decoder.status().phase, HevcStreamPhase::Idle, 5000);
     auto recovered = decoder.status();
     QVERIFY2(recovered.error.isEmpty(), qPrintable(recovered.error));
     QVERIFY2(recovered.diagnostic.isEmpty(), qPrintable(recovered.diagnostic));
@@ -129,6 +140,42 @@ void HevcStreamDecoderCheck::failedSegmentThenRestart()
     QVERIFY(picture.tryAcquire(1, 5000));
     QCOMPARE(index, 1);
     QCOMPARE(decoder.stop().decodedFrames, 1ULL);
+}
+
+void HevcStreamDecoderCheck::dependentPicturesThenKeyframeWithoutPause()
+{
+    QSemaphore delivered;
+    QByteArray lastPixels;
+    HevcStreamDecoder decoder;
+    QVERIFY(decoder.start([&](DecodedVideoFrame frame) {
+        lastPixels = frame.pixels;
+        delivered.release();
+    }));
+    // With its reference the ordinary picture decodes. Let this first segment drain.
+    QVERIFY(decoder.submit(WhitePicture));
+    QVERIFY(decoder.submit(DependentWhitePicture));
+    QVERIFY(delivered.tryAcquire(2, 5000));
+    QTRY_COMPARE_WITH_TIMEOUT(decoder.status().phase, HevcStreamPhase::Idle, 5000);
+    const QByteArray expected = QByteArray(1024, char(235)) + QByteArray(512, char(128));
+    QCOMPARE(lastPixels, expected);
+
+    // These complete access units reach a fresh decoder without the referenced PPS.
+    // Recover in this same segment even when most of its input was undecodable.
+    for (int i = 0; i < 12; ++i)
+        QVERIFY(decoder.submit(DependentWhitePicture));
+    QTRY_VERIFY_WITH_TIMEOUT(decoder.status().phase == HevcStreamPhase::WaitingForPicture
+                             && decoder.status().pendingFrames == 0, 5000);
+    QCOMPARE(decoder.status().decodedFrames, 2ULL);
+    QCOMPARE(decoder.status().pendingBytes, 0);
+    QVERIFY(decoder.submit(WhitePicture));
+    QVERIFY(delivered.tryAcquire(1, 5000));
+    QTRY_COMPARE_WITH_TIMEOUT(decoder.status().phase, HevcStreamPhase::Idle, 5000);
+    const auto recovered = decoder.stop();
+    QCOMPARE(lastPixels, expected);
+    QCOMPARE(recovered.decodedFrames, 3ULL);
+    QCOMPARE(recovered.droppedFrames, 0ULL);
+    QVERIFY2(recovered.error.isEmpty(), qPrintable(recovered.error));
+    QVERIFY(!recovered.diagnostic.isEmpty()); // Segment history remains available after recovery.
 }
 
 void HevcStreamDecoderCheck::missingDecoderReportsRejectedInput()
@@ -147,7 +194,7 @@ void HevcStreamDecoderCheck::missingDecoderReportsRejectedInput()
     QCOMPARE(failed.droppedFrames, 2ULL);
     QCOMPARE(failed.decodedFrames, 0ULL);
     QCOMPARE(failed.pendingFrames, 0);
-    QVERIFY(!failed.segmentActive);
+    QCOMPARE(failed.phase, HevcStreamPhase::Idle);
 }
 
 void HevcStreamDecoderCheck::stalledChildAfterEndOfInput()

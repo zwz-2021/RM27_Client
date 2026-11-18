@@ -79,7 +79,7 @@ SimulationVideoDecode::SimulationVideoDecode(transport::UdpVideoReceiver &receiv
             return;
         if (port_ != 0 && (port != port_ || address != address_)) {
             const auto state = decoder_.status();
-            if (state.segmentActive || state.pendingFrames) {
+            if (state.phase != video::HevcStreamPhase::Idle || state.pendingFrames) {
                 ++otherSourceFrames_;
                 return;
             }
@@ -155,6 +155,10 @@ void SimulationVideoDecode::updateDisplay(const video::HevcStreamStatus &state, 
         const bool hasFrame = currentFrame_.isValid();
         setDisplayState(hasFrame ? QStringLiteral("画面已过期 · 解码失败，请查看运行信息")
                                  : QStringLiteral("解码失败，请查看运行信息"), hasFrame);
+    } else if (state.phase == video::HevcStreamPhase::WaitingForPicture) {
+        const bool hasFrame = currentFrame_.isValid();
+        setDisplayState(hasFrame ? QStringLiteral("画面已过期 · 等待可解码画面")
+                                 : QStringLiteral("等待可解码画面"), hasFrame);
     } else if (currentFrame_.isValid()) {
         const auto now = Clock::now();
         // Draining a quiet recording can deliver delayed pixels. New input alone
@@ -176,7 +180,14 @@ void SimulationVideoDecode::setDisplayState(const QString &text, bool stale)
 
 QString SimulationVideoDecode::statusText(const video::HevcStreamStatus &state) const
 {
-    QString detail = state.segmentActive ? QStringLiteral("正在解码") : QStringLiteral("等待输入");
+    QString detail;
+    switch (state.phase) {
+    case video::HevcStreamPhase::Idle: detail = QStringLiteral("等待输入"); break;
+    case video::HevcStreamPhase::WaitingForPicture:
+        detail = QStringLiteral("等待可解码画面（参数集和关键帧）");
+        break;
+    case video::HevcStreamPhase::Decoding: detail = QStringLiteral("正在解码"); break;
+    }
     detail += QStringLiteral(" · 已解码 %1 帧").arg(state.decodedFrames);
     if (state.width > 0)
         detail += QStringLiteral(" · %1×%2").arg(state.width).arg(state.height);
@@ -187,7 +198,7 @@ QString SimulationVideoDecode::statusText(const video::HevcStreamStatus &state) 
     if (!state.error.isEmpty())
         detail += QStringLiteral("\n解码错误 · %1。请检查视频源和 FFmpeg，必要时停止并重新启动数据源。").arg(state.error);
     if (!state.diagnostic.isEmpty())
-        detail += QStringLiteral("\nFFmpeg · ") + state.diagnostic.simplified().right(320);
+        detail += QStringLiteral("\nFFmpeg 最近诊断 · ") + state.diagnostic.simplified().right(320);
     return QStringLiteral("本机模拟解码 · ") + detail;
 }
 

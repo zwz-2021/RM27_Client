@@ -88,7 +88,8 @@ void HevcStreamDecoder::run(const HevcFileDecoder::FrameHandler &onFrame)
                 inputReady_.wait(&mutex_);
             if (stopping_)
                 return;
-            status_.segmentActive = true;
+            status_.error.clear();
+            status_.phase = HevcStreamPhase::WaitingForPicture;
         }
 
         bool inputClosed = false;
@@ -144,6 +145,7 @@ void HevcStreamDecoder::run(const HevcFileDecoder::FrameHandler &onFrame)
                 frame.index = static_cast<int>(++status_.decodedFrames);
                 status_.width = frame.width;
                 status_.height = frame.height;
+                status_.phase = HevcStreamPhase::Decoding;
                 status_.error.clear();
                 if (!hasSegmentDiagnostic)
                     status_.diagnostic.clear();
@@ -159,7 +161,7 @@ void HevcStreamDecoder::run(const HevcFileDecoder::FrameHandler &onFrame)
         };
         const auto result = detail::decodeHevc({}, stopping_, deliver, feed, diagnostic);
         QMutexLocker lock(&mutex_);
-        status_.segmentActive = false;
+        status_.phase = HevcStreamPhase::Idle;
         if (stopping_)
             return;
         status_.error = writeError.isEmpty() ? result.error : writeError;

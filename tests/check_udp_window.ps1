@@ -30,10 +30,7 @@ $closed = Invoke-ProductWindow $ConfigFile $WindowTitle $Configuration $director
                 if (-not (Get-Command Save-PreviewCapture -ErrorAction SilentlyContinue)) {
                     . (Join-Path $PSScriptRoot 'capture_qt_preview.ps1')
                 }
-                $surface = (Get-Controls)['videoPreviewSurface']
-                if (-not $surface) { throw 'Missing preview surface in the workbench' }
-                $capture = Save-PreviewCapture $client.MainWindowHandle $surface.Current.BoundingRectangle `
-                    (Join-Path $directory 'capture.png')
+                $capture = Save-PreviewCapture $client.MainWindowHandle (Join-Path $directory 'capture.png')
                 [Console]::WriteLine((ConvertTo-Json $capture -Depth 4 -Compress))
             }
             { $_ -in @('overviewTab', 'diagnosticsTab', 'stopButton', 'startButton', 'saveReceiverButton') } {

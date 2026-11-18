@@ -47,16 +47,18 @@ async def expect_pixels(window, name, patterns, tolerance=50):
         image = await window.action("capturePreview")
         rgb = image["rgb"]
         margin = image["sideMargin"]
-        require(len(margin) == 3 and max(margin) <= 45,
-                f"Expected a dark margin beside the fitted picture in the wide test panel: {image}")
+        # A restored window can paint before its accessible preview bounds settle.
+        # Only accept the margin and picture colours together in the same capture.
+        dark_margin = len(margin) == 3 and max(margin) <= 45
         for pattern in patterns:
-            if (len(rgb) == len(pattern) and
+            if (dark_margin and len(rgb) == len(pattern) and
                     all(max(abs(a - b) for a, b in zip(pixel, reference)) <= tolerance
                         for pixel, reference in zip(rgb, pattern))):
                 shutil.copyfile(window.evidence / "capture.png", window.evidence / (name + ".png"))
                 return {"capture": name + ".png", **image}
         if time.monotonic() >= deadline:
-            raise AssertionError(f"{name}: sampled {rgb}, expected {patterns}; see capture.png")
+            raise AssertionError(f"{name}: sampled {rgb}, margin {margin}; expected {patterns} "
+                                 "with a dark side margin; see capture.png")
         await asyncio.sleep(0.1)
 
 

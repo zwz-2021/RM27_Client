@@ -7,6 +7,8 @@
 
 namespace rm27::video {
 
+enum class HevcStreamPhase { Idle, WaitingForPicture, Decoding };
+
 struct HevcStreamStatus {
     int pendingFrames = 0;
     qsizetype pendingBytes = 0;
@@ -14,7 +16,7 @@ struct HevcStreamStatus {
     quint64 decodedFrames = 0;
     int width = 0;
     int height = 0;
-    bool segmentActive = false;
+    HevcStreamPhase phase = HevcStreamPhase::Idle;
     QString error;
     QString diagnostic;
 };

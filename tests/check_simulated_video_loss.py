@@ -1,10 +1,11 @@
-"""AT-056: omit one loopback video fragment and observe recovery in the same Qt window."""
+"""AT-056: observe fragment loss, undecodable input and recovery in the same Qt window."""
 from __future__ import annotations
 
 import argparse
 import asyncio
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import datetime
+import re
 import socket
 import sys
 import traceback
@@ -23,7 +24,7 @@ from simulator.protocol.rm27_base_pb2 import RobotDynamicStatus
 from simulator.server.app import create_app
 from simulator.server.main import build_parser
 from simulator.tools.smoke_test import check_stopped
-from simulator.tools.video_loss_demo import make_clip, send_clip, send_incomplete
+from simulator.tools.video_loss_demo import dependent_frames, make_clip, send_clip, send_incomplete
 
 
 @asynccontextmanager
@@ -83,21 +84,39 @@ async def sending(transfer, *args):
         await task
 
 
-async def expect_drained(window, description, packets, frames, last_frame, source_port):
+async def expect_drained(window, description, packets, assembled, decoded, last_frame, source_port, *, failed=False):
     await window.action("diagnosticsTab")
+    # A recovered segment can retain an FFmpeg diagnostic from before its first decodable frame.
+    detail = r"\n解码错误 · [^\n]+" if failed else r"(?:\nFFmpeg 最近诊断 · [^\n]+)?$"
     await window.observe(description, udpCountersLabel=rf"^有效包 {packets} · 丢弃 0\b",
                          udpLastFrameLabel=rf"帧号 {last_frame} · .*来源 127\.0\.0\.1:{source_port}\b",
-                         udpAssemblyLabel=rf"(?s)完整帧 {frames} · 丢帧 1（超时 1 · 冲突 0 · 超出预算 0）"
+                         udpAssemblyLabel=rf"(?s)完整帧 {assembled} · 丢帧 1（超时 1 · 冲突 0 · 超出预算 0）"
                                           r".*在途 0 帧 · 缓存 0 字节（0 片）",
-                         videoDecodeLabel=rf"等待输入 · 已解码 {frames} 帧 · 1920×1080"
-                                          r" · 排队 0 帧 / 0 字节 · 输入丢弃 0 帧$")
+                         videoDecodeLabel=rf"等待输入 · 已解码 {decoded} 帧 · 1920×1080"
+                                          r" · 排队 0 帧 / 0 字节 · 输入丢弃 0 帧" + detail)
     await window.action("overviewTab")
+
+
+async def expect_waiting(window, description, capture_name, decoded):
+    await window.observe(description, videoPreviewStatus="^画面已过期 · 等待可解码画面$")
+    capture = await expect_pixels(window, capture_name, [[RED] * 4])
+    await window.action("diagnosticsTab")
+    view = await window.observe(description + " (decoder status)",
+                                videoDecodeLabel=rf"等待可解码画面（参数集和关键帧） · 已解码 {decoded} 帧"
+                                                 r" · 1920×1080 · 排队 \d+ 帧 / \d+ 字节 · 输入丢弃 0 帧"
+                                                 r"(?:\nFFmpeg 最近诊断 · [^\n]+)?$")
+    queue = re.search(r"排队 (\d+) 帧 / (\d+) 字节", view["videoDecodeLabel"])
+    frames, size = map(int, queue.groups())
+    require(frames <= 32 and size <= 4 * 1024 * 1024, f"Waiting queue exceeded bounds: {queue.group()}")
+    await window.action("overviewTab")
+    return capture, {"frames": frames, "bytes": size}
 
 
 async def verify(configuration, evidence):
     red, blue = make_clip("red"), make_clip("blue")
+    plain = dependent_frames(blue)
     loops = 4
-    red_count, blue_count = len(red) * loops, len(blue) * loops
+    red_count, blue_count, plain_count = len(red) * loops, len(blue) * loops, len(plain) * loops
     with exclusive_udp(0) as reservation:
         port = reservation.getsockname()[1]
     broker = Broker({
@@ -139,23 +158,43 @@ async def verify(configuration, evidence):
                         f"Fixture did not omit exactly one fragment: {loss}")
                 pre_recovery_packets = red_packets + loss["sentPackets"]
                 await expect_drained(window, "one timeout during silence; only red frames decoded",
-                                     pre_recovery_packets, red_count, red_count - 1, source_port)
+                                     pre_recovery_packets, red_count, red_count, red_count - 1, source_port)
                 await window.observe("last red picture marked stale", videoPreviewStatus="^画面已过期$")
                 await set_health(322)
                 await window.observe("new MQTT value during video loss", videoPreviewStatus="^画面已过期$",
                                      healthValue="^322$", connectionValue="^五类订阅就绪$")
                 captures.append(await expect_pixels(window, "stale-red", [[RED] * 4]))
 
-                async with sending(send_clip, sender, port, red_count + 1, blue, loops) as restored:
+                async with sending(send_clip, sender, port, red_count + 1, plain, loops) as prefix:
+                    capture, first_queue = await expect_waiting(window, "ordinary blue frames over stale red",
+                                                                "waiting-red", red_count)
+                    captures.append(capture)
+                pre_recovery_packets += prefix.result()
+                assembled_before_restart = red_count + plain_count
+                await expect_drained(window, "ordinary frames assembled but no new picture before drain",
+                                     pre_recovery_packets, assembled_before_restart, red_count,
+                                     assembled_before_restart, source_port, failed=True)
+                await window.observe("decoder failure remains visible over the stale red picture",
+                                     videoPreviewStatus="^画面已过期 · 解码失败，请查看运行信息$")
+                captures.append(await expect_pixels(window, "undecodable-red", [[RED] * 4]))
+
+                # A second prefix and the complete clip share one pacing clock. There is no idle
+                # drain between ordinary frames and the independent blue frame that follows them.
+                recovery = plain * loops + blue * loops
+                async with sending(send_clip, sender, port, assembled_before_restart + 1, recovery) as restored:
+                    capture, retry_queue = await expect_waiting(window, "retry replaces old failure with waiting",
+                                                                "waiting-again-red", red_count)
+                    captures.append(capture)
                     await window.observe("new clip playing in the same session", videoPreviewStatus="^正在播放$")
                     await set_health(323)
                     await window.observe("third MQTT value during recovery", videoPreviewStatus="^正在播放$",
                                          healthValue="^323$", connectionValue="^五类订阅就绪$")
                     captures.append(await expect_pixels(window, "recovered-blue", [[BLUE] * 4]))
                 total_packets = pre_recovery_packets + restored.result()
-                total_frames = red_count + blue_count
+                assembled = assembled_before_restart + len(recovery)
+                decoded = red_count + blue_count
                 await expect_drained(window, "all complete blue frames decoded; no second timeout or backlog",
-                                     total_packets, total_frames, total_frames, source_port)
+                                     total_packets, assembled, decoded, assembled, source_port)
             await window.action("stopButton")
             await window.observe("receive session stopped", connectionValue="^已停止$", videoPreviewStatus="^已停止$")
             captures.append(await expect_pixels(window, "stopped", [EMPTY], tolerance=5))
@@ -174,8 +213,11 @@ async def verify(configuration, evidence):
             with socket.socket() as probe:
                 probe.settimeout(1)
                 require(probe.connect_ex(("127.0.0.1", tcp_port)) != 0, f"Listener still on port {tcp_port}")
-    return {"redFrames": red_count, "omission": loss, "recoveredBlueFrames": blue_count,
-            "receivedPackets": total_packets, "assemblyTimeouts": 1, "decodedFrames": total_frames,
+    return {"redFrames": red_count, "omission": loss, "ordinaryFramesBeforeSilence": plain_count,
+            "ordinaryFramesImmediatelyBeforeKeyframe": plain_count, "recoveredBlueFrames": blue_count,
+            "waitingQueueSamples": {"first": first_queue, "retry": retry_queue},
+            "receivedPackets": total_packets, "assemblyTimeouts": 1, "assembledFrames": assembled,
+            "decodedFrames": decoded,
             "pendingFragments": 0, "bufferedBytes": 0, "decoderQueuedBytes": 0, "captures": captures,
             "mqttHealthInWindow": [321, 322, 323], "clientBusinessPublishes": 0,
             "releasedPorts": {"udp": port, "mqtt": mqtt_port, "web": web_port}}
@@ -192,7 +234,7 @@ if __name__ == "__main__":
     try:
         result.update(asyncio.run(verify(options.configuration, directory)))
         result["passed"] = True
-        print("PASS: one missing fragment, stale red pixels, live MQTT and recovered blue pixels.")
+        print("PASS: stale red pixels during undecodable input, visible diagnostics, live MQTT and blue recovery.")
     except Exception:
         result["error"] = traceback.format_exc()
         print(result["error"], file=sys.stderr)

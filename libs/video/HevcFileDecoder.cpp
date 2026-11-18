@@ -201,8 +201,11 @@ HevcDecodeResult detail::decodeHevc(const QString &file, const std::atomic_bool 
     QStringList arguments{"-hide_banner", "-nostdin", "-y", "-loglevel", "error",
         "-protocol_whitelist", pumpInput ? "pipe" : "file", "-hwaccel", "none", "-c:v", "hevc",
         "-threads", "2", "-max_pixels", QString::number(MaxCodedPixels), "-err_detect", "explode"};
-    if (pumpInput)
-        arguments << "-probesize" << "32" << "-analyzeduration" << "1";
+    if (pumpInput) {
+        // A live recording may join mid-GOP. A high fraction of early undecodable
+        // pictures must not turn a later successful recovery into an EOF failure.
+        arguments << "-probesize" << "32" << "-analyzeduration" << "1" << "-max_error_rate" << "1";
+    }
     arguments << QStringList{"-f", "hevc", "-i", pumpInput ? QStringLiteral("pipe:0") : input.absoluteFilePath(),
         "-map", "0:v:0",
         "-fps_mode", "passthrough", "-pix_fmt", "yuv420p", "-f", "yuv4mpegpipe",
