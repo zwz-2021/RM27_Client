@@ -143,6 +143,48 @@ def check_loss_series(capture, frame, report_path):
           f"one source, no extras. Observed group intervals {min(gaps):.1f} to {max(gaps):.1f} ms.")
 
 
+def check_reverse_first_frame(capture, blue, report_path):
+    # Two loops include a second copy of the IDR which must retain its normal slice order.
+    clip = blue * 2
+    check(len(clip[0]) > 1392, "The first blue frame needs multiple slices")
+    first_id = 65535
+    packets = 0
+    first_slices = []
+    first_parts = {}
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
+        sender.bind(("127.0.0.1", 0))
+        source = sender.getsockname()
+        sent = send_clip(sender, capture.getsockname()[1], first_id, blue, 2, reverse_first=True)
+        for offset, frame in enumerate(clip):
+            frame_id = (first_id + offset) % 65536
+            order = range((len(frame) + 1391) // 1392)
+            for index in (reversed(order) if offset == 0 else order):
+                packet, peer = capture.recvfrom(65535)
+                check(peer == source, f"Reverse fixture source changed to {peer}")
+                header = frame_id.to_bytes(2, "big") + index.to_bytes(2, "big") + len(frame).to_bytes(4, "big")
+                expected = header + frame[index * 1392:(index + 1) * 1392]
+                check(packet == expected, f"Reverse fixture byte or order mismatch at frame {frame_id} slice {index}")
+                if offset == 0:
+                    slice_id = int.from_bytes(packet[2:4], "big")
+                    first_slices.append(slice_id)
+                    first_parts[slice_id] = packet[8:]
+                packets += 1
+        check(sent == packets and not select.select([capture], [], [], 0.1)[0],
+              "Unexpected reverse fixture packet count or trailing packet")
+    rebuilt = b"".join(first_parts[index] for index in sorted(first_parts))
+    check(rebuilt == blue[0], "Reassembled reversed first frame differs from the original blue AU")
+    if report_path:
+        report = {"source": list(source), "destination": list(capture.getsockname()),
+                  "firstFrameId": first_id, "firstFrameBytes": len(rebuilt), "receivedFirstSlices": first_slices,
+                  "originalFrameSha256": hashlib.sha256(blue[0]).hexdigest(),
+                  "receivedFrameSha256": hashlib.sha256(rebuilt).hexdigest(),
+                  "followingOrderedFrames": len(clip) - 1, "receivedPackets": packets}
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(f"Reversed first blue frame: received slices {first_slices}, {len(rebuilt)} original bytes; "
+          f"{len(clip) - 1} ordered frames followed, {packets} exact datagrams, one source and no extras.")
+
+
 def check_incremental_extractor():
     # A large first slice spans many reads. A continuation slice belongs to the
     # same frame; the prefix SEI after it belongs to the following frame.
@@ -241,6 +283,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--loss-series-report", type=Path, metavar="JSON",
                         help="write the independent per-frame loopback capture for the repeated loss fixture")
+    parser.add_argument("--reverse-first-report", type=Path, metavar="JSON",
+                        help="write the captured slice order and byte comparison for the reversed first frame")
     args = parser.parse_args()
     check_incremental_extractor()
     with tempfile.TemporaryDirectory(prefix="rm27-video-udp-") as directory:
@@ -261,6 +305,7 @@ def main():
             blue = make_clip("blue")
             check_loss_demo(capture, blue)
             check_loss_series(capture, blue[0], args.loss_series_report)
+            check_reverse_first_frame(capture, blue, args.reverse_first_report)
             failed = subprocess.run([
                 sys.executable, "-X", "utf8", "-m", "simulator.tools.video_sender",
                 str(broken), target[0], str(target[1]),

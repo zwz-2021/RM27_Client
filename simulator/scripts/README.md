@@ -110,6 +110,24 @@ $clip = 'simulator/resources/videos/demo-1080p60.hevc'
 
 自动复测可运行 `.\simulator\.venv\Scripts\python.exe tests/check_simulated_video_loss.py --configuration Debug --consecutive-loss`。终端会打印本次证据目录，内含缓存峰值、窗口状态、过期红帧和恢复蓝帧截图。若只想核对发出的包，运行 `.\simulator\.venv\Scripts\python.exe -m simulator.tools.check_video_datagrams --loss-series-report logs/loss-series-manifest.json` 可保存独立抓取的逐帧清单。
 
+### 手测本机录屏首帧分片倒序
+
+1. 按[打开模拟器和客户端](#打开模拟器和客户端)启动红 3 步兵模拟会话。网页点“停止推流”，保留 MQTT。客户端工作台点“停止”再点“启动数据源”，让计数从零开始。等到“五类订阅就绪”，在“运行信息”确认 UDP 已绑定 `127.0.0.1:3334`，回到工作台。
+2. 另开 PowerShell，在仓库根目录运行以下命令。工具会自行生成测试片，先发五秒红片，随后停发并等你按回车。
+
+   ```powershell
+   .\simulator\.venv\Scripts\python.exe -m simulator.tools.video_loss_demo --reverse-first-frame
+   ```
+
+3. 确认红色末帧标为“画面已过期”。在“运行信息”查看完整帧和已解码帧，等尾帧排空后应各为 300，最近完整帧号为 299，组帧丢帧为 0。此时可在网页修改红 3 血量并点“发送动态状态”，工作台仍应收到新值。
+4. 回到工作台，在发送工具中按一次回车。工具会将蓝片首帧（帧号 300）的全部分片倒序发出，其余 299 帧按正常顺序发送。同一窗口应显示蓝色和“正在播放”。五秒蓝片结束后等末帧过期，在“运行信息”核对最近完整帧号 599、完整帧与已解码帧各 600、丢帧 0，在途、缓存和解码排队均为 0。
+5. 在客户端点“停止”，应清空画面。按[结束测试](#结束测试)关停本轮启动的资源。独立抓包和自动窗口复测可分别用下方命令执行，均使用临时端口。
+
+```powershell
+.\simulator\.venv\Scripts\python.exe -m simulator.tools.check_video_datagrams --reverse-first-report logs/video-reverse-first-wire/manifest.json
+.\simulator\.venv\Scripts\python.exe tests/check_simulated_video_loss.py --configuration Debug --reverse-first-frame
+```
+
 ### 复测 1080p60 录屏的超时与卡顿
 
 如果模拟器后端在更新代码前已启动，先在网页停止推流，运行 `.\simulator\scripts\stop.ps1`，再按上方步骤启动模拟器和新版步兵客户端。客户端进入“五类订阅就绪”后，在网页选 `demo-1080p60-hevc.mp4`、点“切换”，再开始推流。

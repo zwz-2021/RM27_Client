@@ -1,4 +1,4 @@
-"""在本机回环用红、蓝合成录屏演示视频缺片与恢复。"""
+"""在本机回环用红、蓝合成录屏演示视频缺片、乱序与恢复。"""
 
 import argparse
 import re
@@ -43,7 +43,8 @@ def dependent_frames(clip: list[bytes]) -> list[bytes]:
     return frames
 
 
-def send_clip(sock: socket.socket, port: int, first_id: int, clip: list[bytes], loops: int = 1) -> int:
+def send_clip(sock: socket.socket, port: int, first_id: int, clip: list[bytes], loops: int = 1,
+              *, reverse_first: bool = False) -> int:
     target = ("127.0.0.1", port)
     start = time.monotonic()
     count = 0
@@ -51,13 +52,20 @@ def send_clip(sock: socket.socket, port: int, first_id: int, clip: list[bytes], 
         remaining = start + index / FPS - time.monotonic()
         if remaining > 0:
             time.sleep(remaining)
-        packets, _ = send_video_frame(sock, target, first_id + index, clip[index % len(clip)])
-        count += packets
+        frame = clip[index % len(clip)]
+        if reverse_first and index == 0:
+            datagrams = _capture_fragments(target, first_id, frame)
+            for packet in reversed(datagrams):
+                sock.sendto(packet, target)
+            count += len(datagrams)
+        else:
+            packets, _ = send_video_frame(sock, target, first_id + index, frame)
+            count += packets
     return count
 
 
 class _FrameCapture:
-    """只暂存这一帧按正常模拟器路径生成的 UDP 包，选好漏片后再发出。"""
+    """暂存一帧按正常模拟器路径生成的 UDP 包，供演示工具逐片发送。"""
 
     def __init__(self):
         self.datagrams: list[bytes] = []
@@ -67,13 +75,17 @@ class _FrameCapture:
         return len(datagram)
 
 
-def send_incomplete(sock: socket.socket, port: int, frame_id: int, frame: bytes) -> dict:
-    target = ("127.0.0.1", port)
+def _capture_fragments(target: tuple[str, int], frame_id: int, frame: bytes) -> list[bytes]:
     capture = _FrameCapture()
     send_video_frame(capture, target, frame_id, frame)
-    datagrams = capture.datagrams
-    if len(datagrams) < 2:
-        raise ValueError("缺片测试帧至少需要两个分片")
+    if len(capture.datagrams) < 2:
+        raise ValueError("缺片或倒序测试至少需要两个分片")
+    return capture.datagrams
+
+
+def send_incomplete(sock: socket.socket, port: int, frame_id: int, frame: bytes) -> dict:
+    target = ("127.0.0.1", port)
+    datagrams = _capture_fragments(target, frame_id, frame)
     omitted = 1
     for index, datagram in enumerate(datagrams):
         if index != omitted:
@@ -100,6 +112,7 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--wait-for-keyframe", action="store_true", help="恢复前先发缺少参数集和起始关键帧的普通蓝帧")
     mode.add_argument("--consecutive-loss", action="store_true", help="连续发送多组各缺一片的帧，观察过期画面和缓存回收")
+    mode.add_argument("--reverse-first-frame", action="store_true", help="待红片过期后，将完整蓝片的首帧分片全部倒序发送")
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("端口应在 1 至 65535 之间")
@@ -107,24 +120,29 @@ def main():
     red, blue = make_clip("red"), make_clip("blue")
     ordinary = dependent_frames(blue) if args.wait_for_keyframe else []
     loops = 5
-    damaged_id = len(red) * loops
+    next_id = len(red) * loops
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         print(f"向 127.0.0.1:{args.port} 发送五秒红色画面。", flush=True)
         send_clip(sock, args.port, 0, red, loops)
         if args.consecutive_loss:
             print(f"开始发送 {LOSS_GROUPS} 组缺片样本，每组 {LOSS_GROUP_SIZE} 帧。"
                   "请观察红色末帧过期，并在网页更改血量，查看工作台是否更新。", flush=True)
-            manifest = send_loss_series(sock, args.port, damaged_id, blue[0])
-            next_id = damaged_id + len(manifest)
-            print(f"已发完帧号 {damaged_id} 至 {next_id - 1} 的 {len(manifest)} 个缺片帧，每帧漏发片号 1。"
+            manifest = send_loss_series(sock, args.port, next_id, blue[0])
+            print(f"已发完帧号 {next_id} 至 {next_id + len(manifest) - 1} 的 {len(manifest)} 个缺片帧，每帧漏发片号 1。"
                   "请在运行信息查看超时、超出预算和在途帧数。", flush=True)
+            next_id += len(manifest)
+        elif args.reverse_first_frame:
+            print("红片已发完，图传已暂停。红色末帧应标为过期，累计丢帧应为 0。", flush=True)
         else:
-            loss = send_incomplete(sock, args.port, damaged_id, blue[0])
-            next_id = damaged_id + 1
-            print(f"第 {damaged_id} 帧共 {loss['sliceCount']} 片，已故意漏发片号 {loss['omittedSlice']}。"
+            loss = send_incomplete(sock, args.port, next_id, blue[0])
+            print(f"第 {next_id} 帧共 {loss['sliceCount']} 片，已故意漏发片号 {loss['omittedSlice']}。"
                   "图传已暂停，等待末帧过期。", flush=True)
+            next_id += 1
         time.sleep(2)
-        input("请检查红色末帧过期、组帧超时及网页血量更新。确认后在这里按回车继续。")
+        if args.reverse_first_frame:
+            input(f"请检查红色末帧过期、运行信息中完整帧为 {next_id} 且丢帧为 0，再按回车。")
+        else:
+            input("请检查红色末帧过期、组帧超时及网页血量更新。确认后在这里按回车继续。")
         if ordinary:
             count = len(ordinary) * loops
             print(f"约五秒内连续发送 {count} 个普通蓝帧，缺少参数集和起始关键帧。"
@@ -133,8 +151,10 @@ def main():
             next_id += count
             input("普通帧已发完。等尾部排空后，红色画面应仍过期，运行信息应显示解码失败、排队为零。"
                   "按回车发送完整蓝片。")
+        if args.reverse_first_frame:
+            print(f"蓝片首帧（帧号 {next_id}）的全部分片将倒序发出，后续帧按正常顺序发送。", flush=True)
         print("正在发送五秒蓝色画面。", flush=True)
-        send_clip(sock, args.port, next_id, blue, loops)
+        send_clip(sock, args.port, next_id, blue, loops, reverse_first=args.reverse_first_frame)
     print("发送结束。客户端应保留蓝色末帧，随后显示过期。")
 
 
@@ -144,4 +164,4 @@ if __name__ == "__main__":
     except (KeyboardInterrupt, EOFError):
         raise SystemExit("已结束本机测试发送。") from None
     except (OSError, ValueError, subprocess.SubprocessError) as error:
-        raise SystemExit(f"本机缺片测试失败：{error}") from None
+        raise SystemExit(f"本机录屏测试失败：{error}") from None

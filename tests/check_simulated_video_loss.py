@@ -1,4 +1,4 @@
-"""AT-056: observe fragment loss, undecodable input and recovery in the same Qt window."""
+"""AT-056: observe missing or reordered fragments and recovery in the same Qt window."""
 from __future__ import annotations
 
 import argparse
@@ -75,9 +75,9 @@ async def simulator_console(mqtt_port):
 
 
 @asynccontextmanager
-async def sending(transfer, *args):
+async def sending(transfer, *args, **kwargs):
     # Keep the sending socket open until its finite recording has finished, including on a failed assertion.
-    task = asyncio.create_task(asyncio.to_thread(transfer, *args))
+    task = asyncio.create_task(asyncio.to_thread(transfer, *args, **kwargs))
     try:
         yield task
     finally:
@@ -85,7 +85,7 @@ async def sending(transfer, *args):
 
 
 async def expect_drained(window, description, packets, assembled, decoded, last_frame, source_port, *,
-                         timeouts=1, over_budget=0, failed=False):
+                         timeouts=1, over_budget=0, failed=False, header=None):
     await window.action("diagnosticsTab")
     # A recovered segment can retain an FFmpeg diagnostic from before its first decodable frame.
     detail = r"\n解码错误 · [^\n]+" if failed else r"(?:\nFFmpeg 最近诊断 · [^\n]+)?$"
@@ -95,7 +95,8 @@ async def expect_drained(window, description, packets, assembled, decoded, last_
                                           rf"（超时 {timeouts} · 冲突 0 · 超出预算 {over_budget}）"
                                           r".*在途 0 帧 · 缓存 0 字节（0 片）",
                          videoDecodeLabel=rf"等待输入 · 已解码 {decoded} 帧 · 1920×1080"
-                                          r" · 排队 0 帧 / 0 字节 · 输入丢弃 0 帧" + detail)
+                                          r" · 排队 0 帧 / 0 字节 · 输入丢弃 0 帧" + detail,
+                         **({"udpHeaderLabel": header} if header else {}))
     await window.action("overviewTab")
 
 
@@ -177,9 +178,46 @@ async def check_missing_start(window, sender, port, red_count, blue, plain, red_
             "waitingQueueSamples": {"first": first_queue}}, received
 
 
-async def verify(configuration, evidence, consecutive_loss=False):
+async def check_reordered_start(window, sender, port, red_count, red_packets, blue, set_health, captures):
+    source_port = sender.getsockname()[1]
+    await expect_drained(window, "red recording drained before the silent interval", red_packets,
+                         red_count, red_count, red_count - 1, source_port, timeouts=0)
+    captures.append(await check_stale_red(window, set_health))
+
+    # Stop after one recording: a later loop's IDR must not rescue a broken first frame.
+    dependent_frames(blue)
+    blue_packets = sum((len(frame) + 1391) // 1392 for frame in blue)
+    async with sending(send_clip, sender, port, red_count, blue, reverse_first=True) as restored:
+        await window.observe("reordered recording playing before a second keyframe is sent",
+                             videoPreviewStatus="^正在播放$")
+        captures.append(await expect_pixels(window, "first-reordered-blue", [[BLUE] * 4]))
+    require(restored.result() == blue_packets, "Unexpected packet count in the reordered recording")
+    assembled = red_count + len(blue)
+    await expect_drained(window, "all pictures from the first blue recording decoded before another IDR",
+                         red_packets + blue_packets, assembled, assembled, assembled - 1, source_port, timeouts=0)
+    return {"damagedFrames": 0, "assemblyTimeouts": 0, "assemblyOverBudget": 0,
+            "firstReorderedFrameId": red_count, "blueFramesBeforeNextKeyframe": len(blue)}, red_packets + blue_packets
+
+
+async def check_single_reordered_frame(window, sender, port, frame, frame_id, packets, frames):
+    # Recheck the same complete AU on its own, so its exact delivery count and last
+    # received fragment stay visible however long UI Automation takes to read them.
+    count = (len(frame) + 1391) // 1392
+    require(count >= 2, "Reorder probe requires at least two fragments")
+    require(send_clip(sender, port, frame_id, [frame], reverse_first=True) == count, "Wrong probe packet count")
+    source_port = sender.getsockname()[1]
+    header = (rf"来源 127\.0\.0\.1:{source_port} · 整包 1400 字节 · 帧号 {frame_id} · "
+              rf"分片号 0 · 整帧 {len(frame)} 字节")
+    await expect_drained(window, "isolated reversed first AU adds exactly one complete and decoded frame",
+                         packets + count, frames + 1, frames + 1, frame_id, source_port,
+                         timeouts=0, header=header)
+    return {"frameId": frame_id, "frameBytes": len(frame), "packets": count, "lastReceivedSlice": 0,
+            "sessionPacketsAfterProbe": packets + count, "sessionFramesAfterProbe": frames + 1}
+
+
+async def verify(configuration, evidence, scenario):
     red, blue = make_clip("red"), make_clip("blue")
-    loops = 5 if consecutive_loss else 4  # Match the five-second colour stages of the manual loss series.
+    loops = 4 if scenario == "missing-start" else 5
     red_count, blue_count = len(red) * loops, len(blue) * loops
     with exclusive_udp(0) as reservation:
         port = reservation.getsockname()[1]
@@ -214,18 +252,27 @@ async def verify(configuration, evidence, consecutive_loss=False):
                     captures.append(await expect_pixels(window, "playing-red", [[RED] * 4]))
                 red_packets = initial.result()
                 plain = []
-                if consecutive_loss:
+                assembled_before_restart = red_count
+                recovery = blue * loops
+                if scenario == "reverse-first-frame":
+                    expected_red_packets = loops * sum((len(frame) + 1391) // 1392 for frame in red)
+                    require(red_packets == expected_red_packets, "Unexpected number of packets in the red recording")
+                    fault, pre_recovery_packets = await check_reordered_start(
+                        window, sender, port, red_count, red_packets, blue, set_health, captures)
+                    assembled_before_restart += len(blue)
+                    recovery = blue * (loops - 1)
+                elif scenario == "consecutive-loss":
                     fault, pre_recovery_packets = await check_loss_series(
                         window, sender, port, red_count, blue[0], red_packets, set_health, captures)
                 else:
                     plain = dependent_frames(blue) * loops
                     fault, pre_recovery_packets = await check_missing_start(
                         window, sender, port, red_count, blue, plain, red_packets, set_health, captures)
-                assembled_before_restart = red_count + len(plain)
+                    assembled_before_restart += len(plain)
+                    recovery = plain + recovery  # No idle drain between the dependent prefix and the keyframe.
                 next_id = assembled_before_restart + fault["damagedFrames"]
-                recovery = plain + blue * loops  # No idle drain between a dependent prefix and the keyframe.
                 async with sending(send_clip, sender, port, next_id, recovery) as restored:
-                    if not consecutive_loss:
+                    if plain:
                         capture, retry_queue = await expect_waiting(window, "retry replaces old failure with waiting",
                                                                     "waiting-again-red", red_count)
                         captures.append(capture)
@@ -241,6 +288,9 @@ async def verify(configuration, evidence, consecutive_loss=False):
                 await expect_drained(window, "all complete blue frames decoded; no extra losses or backlog",
                                      total_packets, assembled, decoded, next_id + len(recovery) - 1, source_port,
                                      timeouts=fault["assemblyTimeouts"], over_budget=fault["assemblyOverBudget"])
+                if scenario == "reverse-first-frame":
+                    fault["singleAccessUnitProbe"] = await check_single_reordered_frame(
+                        window, sender, port, blue[0], next_id + len(recovery), total_packets, assembled)
             await window.action("stopButton")
             await window.observe("receive session stopped", connectionValue="^已停止$", videoPreviewStatus="^已停止$")
             captures.append(await expect_pixels(window, "stopped", [EMPTY], tolerance=5))
@@ -270,17 +320,22 @@ async def verify(configuration, evidence, consecutive_loss=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--configuration", choices=("Debug", "Release"), default="Debug")
-    parser.add_argument("--consecutive-loss", action="store_true", help="Exercise 16 groups of incomplete loopback frames")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--consecutive-loss", dest="scenario", action="store_const", const="consecutive-loss",
+                      help="Exercise 16 groups of incomplete loopback frames")
+    mode.add_argument("--reverse-first-frame", dest="scenario", action="store_const", const="reverse-first-frame",
+                      help="Reverse all fragments of the first blue frame after the red recording expires")
+    parser.set_defaults(scenario="missing-start")
     options = parser.parse_args()
     directory = ROOT / "logs" / datetime.now().strftime("check-simulated-loss-%Y%m%d-%H%M%S-%f")
     directory.mkdir(parents=True)
     print(f"Qt fragment-loss evidence: {directory}", flush=True)
     result = {"passed": False, "configuration": options.configuration, "entry": "scripts/run.ps1",
-              "scenario": "consecutive-loss" if options.consecutive_loss else "missing-start"}
+              "scenario": options.scenario}
     try:
-        result.update(asyncio.run(verify(options.configuration, directory, options.consecutive_loss)))
+        result.update(asyncio.run(verify(options.configuration, directory, options.scenario)))
         result["passed"] = True
-        print("PASS: stale red pixels, expected loss diagnostics, live MQTT and blue recovery.")
+        print("PASS: stale red pixels, expected fragment diagnostics, live MQTT and blue recovery.")
     except Exception:
         result["error"] = traceback.format_exc()
         print(result["error"], file=sys.stderr)
