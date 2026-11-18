@@ -5,6 +5,7 @@ add_library(rm27_transport STATIC
     UnavailableDataSource.h
     MqttDataSource.cpp
     MqttDataSource.h
+    UdpPacketRateWindow.h
     UdpVideoReceiver.cpp
     UdpVideoReceiver.h
 )

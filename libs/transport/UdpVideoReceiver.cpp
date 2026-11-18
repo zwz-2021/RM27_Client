@@ -23,7 +23,13 @@ UdpVideoReceiver::UdpVideoReceiver(QObject *parent)
     expiry_.setTimerType(Qt::PreciseTimer);
     connect(socket_, &QUdpSocket::readyRead, this, &UdpVideoReceiver::drain);
     connect(&continuation_, &QTimer::timeout, this, &UdpVideoReceiver::drain);
-    connect(&notification_, &QTimer::timeout, this, &UdpVideoReceiver::statusChanged);
+    connect(&notification_, &QTimer::timeout, this, [this] {
+        status_.validPacketsLastSecond = packetRate_.countAt(sessionClock_.elapsed());
+        // Refresh through silence until the final packet ages out.
+        if (status_.validPacketsLastSecond != 0)
+            notification_.start();
+        emit statusChanged();
+    });
     connect(&expiry_, &QTimer::timeout, this, [this] {
         if (assembler_.expire(sessionClock_.elapsed())) {
             status_.assembly = assembler_.stats();
@@ -83,6 +89,8 @@ void UdpVideoReceiver::closeSocket()
     notification_.stop();
     expiry_.stop();
     status_.lastValidPacketAt.invalidate();
+    packetRate_.clear();
+    status_.validPacketsLastSecond = 0;
     assembleLocalSimulation_ = false;
     assembler_.reset();
     status_.assembly.pendingFrames = 0;
@@ -151,6 +159,7 @@ void UdpVideoReceiver::drain()
             } else {
                 ++status_.validPackets;
                 status_.lastValidPacketAt.start();
+                status_.validPacketsLastSecond = packetRate_.record(sessionClock_.elapsed());
                 status_.lastHeader = header;
                 status_.lastSourceAddress = address;
                 status_.lastSourcePort = senderPort;

@@ -197,6 +197,7 @@ async def check_reordered_start(window, sender, port, red_count, red_packets, bl
     await window.action("diagnosticsTab")
     await asyncio.sleep(1.5)
     silent_view = await window.observe("UDP stays silent while new MQTT health reaches the same window",
+                                       udpPacketRateLabel="^最近 1 秒有效 UDP 收包：0 包/秒$",
                                        udpCountersLabel=rf"^有效包 {red_packets} · 丢弃 0\b")
     silent_age = packet_age_seconds(silent_view)
     require(silent_age >= red_age + 1.0, f"Packet age did not advance during silence: {red_age} -> {silent_age}")
@@ -221,6 +222,7 @@ async def check_reordered_start(window, sender, port, red_count, red_packets, bl
     require(blue_age <= time.monotonic() - resumed_at + 0.3, f"Old packet age survived blue recovery: {blue_age}")
     return {"damagedFrames": 0, "assemblyTimeouts": 0, "assemblyOverBudget": 0,
             "localPacketAgeSeconds": {"afterRed": red_age, "duringSilence": silent_age, "afterBlue": blue_age},
+            "packetRateDuringSilence": silent_view["udpPacketRateLabel"],
             "firstReorderedFrameId": red_count, "blueFramesBeforeNextKeyframe": len(blue)}, red_packets + blue_packets
 
 

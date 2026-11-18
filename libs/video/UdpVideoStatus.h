@@ -51,6 +51,7 @@ struct UdpVideoStatus {
     std::optional<int> simulationReceiveBufferBytes; // OS readback, <= 0 if unavailable.
 
     quint64 validPackets = 0;
+    quint64 validPacketsLastSecond = 0;
     quint64 shortPackets = 0;
     quint64 oversizedPackets = 0;
     quint64 emptyPayloadPackets = 0;

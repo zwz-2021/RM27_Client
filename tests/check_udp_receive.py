@@ -1,4 +1,4 @@
-"""Exercise AT-052/053 through the Windows launcher, real Qt window and loopback sockets."""
+"""Exercise AT-052/053/067 through the Windows launcher, real Qt window and loopback sockets."""
 from __future__ import annotations
 
 import argparse
@@ -90,16 +90,33 @@ async def check_assembly(window, target):
             bytes.fromhex("ff ff 00 01 00 00 00 06 42 43"),
             bytes.fromhex("ff ff 00 02 00 00 00 06 44 45 46"),
         ]
+        # Four valid UDP packets complete one frame, including a duplicate fragment.
+        # Short datagrams in the same burst must only change the discard counter.
+        burst_start = time.monotonic()
         for index in (2, 1, 1, 0):
             sender.sendto(fragments[index], target)
-        await window.observe("out-of-order and duplicate fragments complete one frame",
-                             udpAssemblyLabel=r"完整帧 1\b.*重复分片 1\b",
-                             udpLastFrameLabel=rf"帧号 65535 · 长度 6 字节 · {source}")
+        for _ in range(2):
+            sender.sendto(b"\x00", target)
+        burst = await window.observe("four valid packets and two short packets complete one frame",
+                                     udpPacketRateLabel="^最近 1 秒有效 UDP 收包：4 包/秒$",
+                                     udpCountersLabel=r"^有效包 4 · 丢弃 2\b",
+                                     udpAssemblyLabel=r"完整帧 1\b.*重复分片 1\b",
+                                     udpLastFrameLabel=rf"帧号 65535 · 长度 6 字节 · {source}")
+        idle = await window.observe("one second of silence expires all four packets",
+                                    udpPacketRateLabel="^最近 1 秒有效 UDP 收包：0 包/秒$",
+                                    udpCountersLabel=r"^有效包 4 · 丢弃 2\b")
+        idle_elapsed = time.monotonic() - burst_start
+        # UI Automation may spend up to two seconds retrying the accessibility tree.
+        # The C++ check verifies the exact expiry boundary with a controlled clock.
+        require(0.99 <= idle_elapsed <= 4.0,
+                f"One-second rate window reported zero after {idle_elapsed:.3f} seconds")
+        await window.action("captureDiagnostics")
 
         sender.sendto(bytes.fromhex("00 00 00 00 00 00 00 01 47"), target)
         last = rf"帧号 0 · 长度 1 字节 · {source}"
-        await window.observe("same sender wraps to complete frame zero", udpAssemblyLabel=r"完整帧 2\b",
-                             udpLastFrameLabel=last)
+        resumed = await window.observe("same sender resumes with one valid packet and completes frame zero",
+                                       udpPacketRateLabel="^最近 1 秒有效 UDP 收包：1 包/秒$",
+                                       udpAssemblyLabel=r"完整帧 2\b", udpLastFrameLabel=last)
 
         sender.sendto(bytes.fromhex("00 01 00 01 00 00 00 03 48"), target)
         await window.observe("incomplete frame expires without any further UDP traffic",
@@ -116,7 +133,9 @@ async def check_assembly(window, target):
         await window.observe("conflict, late tail and over-budget frame discarded",
                              udpAssemblyLabel=r"(?s)完整帧 2\b.*丢帧 3\b.*超时 1\b.*冲突 1\b.*超出预算 1\b"
                                               r".*重复分片 1\b.*迟到分片 1\b.*在途 0 帧.*缓存 0 字节",
-                             udpLastFrameLabel=last, udpCountersLabel=r"^有效包 10 · 丢弃 0\b")
+                             udpLastFrameLabel=last, udpCountersLabel=r"^有效包 10 · 丢弃 2\b")
+        return {"burst": burst["udpPacketRateLabel"], "idle": idle["udpPacketRateLabel"],
+                "resumed": resumed["udpPacketRateLabel"], "idleObservedAfterSeconds": round(idle_elapsed, 3)}
 
 
 async def verify(configuration, evidence):
@@ -152,7 +171,8 @@ async def verify(configuration, evidence):
             await broker.internal_message_broadcast("RobotDynamicStatus", bytes.fromhex("08 c1 02"), qos=1)
             await window.observe("fresh MQTT health with UDP port occupied", healthValue="^321$")
             await window.action("diagnosticsTab")
-            await window.observe("port conflict reported", udpBindingLabel=rf"绑定失败.*127\.0\.0\.1:{port}\b")
+            await window.observe("port conflict reported", udpBindingLabel=rf"绑定失败.*127\.0\.0\.1:{port}\b",
+                                 udpPacketRateLabel="^最近 1 秒有效 UDP 收包：—$")
             await window.action("overviewTab")
             await window.action("stopButton")
             await window.observe("first stop", connectionValue="^已停止$")
@@ -164,6 +184,7 @@ async def verify(configuration, evidence):
             await window.observe("UDP bound with fresh counters", udpBindingLabel=rf"已绑定 127\.0\.0\.1:{port}\b",
                                  udpCountersLabel=r"^有效包 0 · 丢弃 0\b", udpHeaderLabel="尚未收到有效包",
                                  udpPacketAgeLabel="^等待本会话首个有效 UDP 包$",
+                                 udpPacketRateLabel="^最近 1 秒有效 UDP 收包：0 包/秒$",
                                  udpAssemblyLabel=r"完整帧 0\b", udpLastFrameLabel="尚未收到完整帧")
 
             with exclusive_udp(0) as sender:
@@ -207,6 +228,7 @@ async def verify(configuration, evidence):
                 await window.observe("UDP released and last header cleared", udpBindingLabel="已停止",
                                      udpHeaderLabel="尚未收到有效包", udpCountersLabel=r"^有效包 0 · 丢弃 0\b",
                                      udpPacketAgeLabel="^—$",
+                                     udpPacketRateLabel="^最近 1 秒有效 UDP 收包：—$",
                                      udpAssemblyLabel=r"(?s)完整帧 0\b.*超时 0\b.*在途 0 帧.*缓存 0 字节",
                                      udpLastFrameLabel="尚未收到完整帧")
             await window.action("overviewTab")
@@ -215,8 +237,9 @@ async def verify(configuration, evidence):
             await window.observe("new session without old data", udpBindingLabel=rf"已绑定 127\.0\.0\.1:{port}\b",
                                  udpCountersLabel=r"^有效包 0 · 丢弃 0\b", udpHeaderLabel="尚未收到有效包",
                                  udpPacketAgeLabel="^等待本会话首个有效 UDP 包$",
+                                 udpPacketRateLabel="^最近 1 秒有效 UDP 收包：0 包/秒$",
                                  udpAssemblyLabel=r"完整帧 0\b", udpLastFrameLabel="尚未收到完整帧")
-            await check_assembly(window, target)
+            packet_rates = await check_assembly(window, target)
 
     with exclusive_udp(port), socket.socket() as probe:
         probe.settimeout(1)
@@ -233,7 +256,7 @@ async def verify(configuration, evidence):
                        "video.bound", "video.stopped"] and records[-1]["event"] == "client.stop",
             f"Unexpected client lifecycle log: {events}")
     totals = [row["detail"] for row in records if row["event"] == "video.stopped"]
-    require(totals == ["有效包 0 · 丢弃 0", f"有效包 {simulator_packets + 2} · 丢弃 11", "有效包 10 · 丢弃 0"],
+    require(totals == ["有效包 0 · 丢弃 0", f"有效包 {simulator_packets + 2} · 丢弃 11", "有效包 10 · 丢弃 2"],
             f"Client log disagrees with window counters: {totals}")
     assembly = [row["detail"] for row in records if row["event"] == "video.assembly_summary"]
     require(len(assembly) == 2 and re.search(r"完整帧 5\b", assembly[0])
@@ -242,7 +265,7 @@ async def verify(configuration, evidence):
     return {"udpPortReleased": port, "brokerPortReleased": mqtt_port, "simulatorPackets": simulator_packets,
             "simulatorCompleteFrames": 4, "fixtureCompleteFrames": 2, "fixtureTimeouts": 1,
             "fixtureConflicts": 1, "fixtureBudgetDrops": 1, "mqttSubscriptions": len(topics),
-            "clientBusinessPublishes": 0, "clientLog": log_file.name}
+            "clientBusinessPublishes": 0, "clientLog": log_file.name, "udpPacketRates": packet_rates}
 
 
 if __name__ == "__main__":

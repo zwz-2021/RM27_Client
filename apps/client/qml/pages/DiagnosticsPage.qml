@@ -35,6 +35,13 @@ ScrollView {
           wrapMode: Text.Wrap
         }
         Label {
+          objectName: "udpPacketRateLabel"
+          Layout.fillWidth: true
+          text: root.viewModel.udpPacketRateText
+          visible: text.length > 0
+          wrapMode: Text.Wrap
+        }
+        Label {
           objectName: "udpPacketAgeLabel"
           Layout.fillWidth: true
           text: root.viewModel.udpPacketAgeText

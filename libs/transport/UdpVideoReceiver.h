@@ -1,5 +1,6 @@
 #pragma once
 
+#include "transport/UdpPacketRateWindow.h"
 #include "video/UdpVideoStatus.h"
 #include "video/VideoFrameAssembler.h"
 #include <QElapsedTimer>
@@ -33,6 +34,7 @@ private:
     QTimer notification_;
     QTimer expiry_;
     QElapsedTimer sessionClock_;
+    UdpPacketRateWindow packetRate_;
     bool assembleLocalSimulation_ = false;
     video::VideoFrameAssembler assembler_;
     video::UdpVideoStatus status_;

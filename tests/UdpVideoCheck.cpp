@@ -10,6 +10,7 @@ using rm27::video::UdpVideoState;
 class UdpVideoCheck final : public QObject {
     Q_OBJECT
 private slots:
+    void oneSecondWindow();
     void wireSamples();
     void exclusiveBindAndRestart();
     void burst();
@@ -17,6 +18,26 @@ private slots:
     void assembleSimulationBytes();
     void assemblySessionBoundary();
 };
+
+void UdpVideoCheck::oneSecondWindow()
+{
+    rm27::transport::UdpPacketRateWindow window;
+    QCOMPARE(window.countAt(0), 0ULL);
+    window.record(10);
+    window.record(10);
+    window.record(500);
+    QCOMPARE(window.countAt(1009), 3ULL);
+    QCOMPARE(window.countAt(1010), 1ULL);
+    QCOMPARE(window.record(1499), 2ULL);
+    QCOMPARE(window.countAt(1500), 1ULL);
+    QCOMPARE(window.countAt(2499), 0ULL);
+    QCOMPARE(window.record(10000), 1ULL);
+    // One packet per millisecond across two full windows without a read.
+    for (qint64 ms = 10001; ms <= 12000; ++ms)
+        window.record(ms);
+    QCOMPARE(window.countAt(12000), 1000ULL);
+    QCOMPARE(window.countAt(12500), 500ULL);
+}
 
 void UdpVideoCheck::wireSamples()
 {
@@ -42,11 +63,13 @@ void UdpVideoCheck::wireSamples()
     QCOMPARE(s.emptyPayloadPackets, 1ULL);
     QCOMPARE(s.inconsistentFramePackets, 1ULL);
     QVERIFY(!s.lastHeader && !s.validPackets && !s.lastValidPacketAt.isValid());
+    QCOMPARE(s.validPacketsLastSecond, 0ULL);
 
     // Literal network bytes independent of the simulator. An untrusted frame length
     // is reported verbatim and must never cause an allocation at the header stage.
     send(QByteArray::fromHex("ffff0102f1020304") + QByteArray(1392, 'a'));
     QTRY_COMPARE(s.validPackets, 1ULL);
+    QCOMPARE(s.validPacketsLastSecond, 1ULL);
     QVERIFY(s.lastHeader);
     QCOMPARE(s.lastHeader->frameId, 65535);
     QCOMPARE(s.lastHeader->fragmentIndex, 0x0102);
@@ -59,9 +82,11 @@ void UdpVideoCheck::wireSamples()
     QTRY_VERIFY(firstPacketAt.elapsed() >= 1);
     send(QByteArray(3, 'x'));
     QTRY_COMPARE(s.shortPackets, 9ULL);
+    QCOMPARE(s.validPacketsLastSecond, 1ULL);
     QVERIFY(s.lastValidPacketAt == firstPacketAt);
     send(QByteArray::fromHex("0000000000000001ab"));
     QTRY_COMPARE(s.validPackets, 2ULL);
+    QCOMPARE(s.validPacketsLastSecond, 2ULL);
     QVERIFY(firstPacketAt.msecsTo(s.lastValidPacketAt) > 0);
     QCOMPARE(s.lastHeader->frameId, 0);
     QCOMPARE(s.lastHeader->fragmentIndex, 0);
@@ -92,17 +117,21 @@ void UdpVideoCheck::exclusiveBindAndRestart()
     QTRY_COMPARE(s.validPackets, 1ULL);
     QVERIFY(receiver.start(address, port));
     QCOMPARE(s.validPackets, 1ULL);
+    QCOMPARE(s.validPacketsLastSecond, 1ULL);
     QCOMPARE(sender.writeDatagram(one, QHostAddress::LocalHost, port), one.size());
     receiver.stop(); // a datagram is still queued in the old socket
     receiver.stop();
     QVERIFY(s.state == UdpVideoState::Stopped && !s.lastHeader && s.lastSourceAddress.isEmpty() && !s.validPackets);
     QVERIFY(!s.lastValidPacketAt.isValid());
+    QCOMPARE(s.validPacketsLastSecond, 0ULL);
     QVERIFY(holder.bind(QHostAddress::LocalHost, port, QAbstractSocket::DontShareAddress));
     holder.close();
     QVERIFY(receiver.start(address, port));
     QVERIFY(!s.lastValidPacketAt.isValid());
+    QCOMPARE(s.validPacketsLastSecond, 0ULL);
     QCOMPARE(sender.writeDatagram(one, QHostAddress::LocalHost, port), one.size());
     QTRY_COMPARE(s.validPackets, 1ULL);
+    QCOMPARE(s.validPacketsLastSecond, 1ULL);
     QCOMPARE(s.droppedPackets(), 0ULL);
     QCOMPARE(s.lastHeader->frameId, 0x3456);
 }
@@ -117,8 +146,17 @@ void UdpVideoCheck::burst()
     for (int i = 0; i < 96; ++i)
         QCOMPARE(sender.writeDatagram(one, QHostAddress::LocalHost, receiver.status().bindPort), one.size());
     QTRY_COMPARE(receiver.status().validPackets, 96ULL);
+    QCOMPARE(receiver.status().validPacketsLastSecond, 96ULL);
     QTRY_VERIFY(!changes.isEmpty());
     QVERIFY(changes.count() < 96);
+    QTRY_COMPARE(receiver.status().validPacketsLastSecond, 0ULL);
+    QCOMPARE(receiver.status().validPackets, 96ULL);
+    const auto idleChanges = changes.count();
+    QTest::qWait(250);
+    QCOMPARE(changes.count(), idleChanges);
+    QCOMPARE(sender.writeDatagram(one, QHostAddress::LocalHost, receiver.status().bindPort), one.size());
+    QTRY_COMPARE(receiver.status().validPackets, 97ULL);
+    QCOMPARE(receiver.status().validPacketsLastSecond, 1ULL);
 }
 
 void UdpVideoCheck::simulationKeyframeBurst()
