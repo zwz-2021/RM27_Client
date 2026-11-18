@@ -52,6 +52,24 @@ $clip = 'simulator/resources/videos/demo-1080p60.hevc'
 .\simulator\.venv\Scripts\python.exe tests/check_simulated_video_display.py --configuration Debug
 ```
 
+### 手测本机录屏丢一片并恢复
+
+1. 按[打开模拟器和客户端](#打开模拟器和客户端)启动两者，选择红 3。网页点“停止推流”，保持模拟器和 MQTT 运行。要从零计数，可在客户端“工作台”点“停止”，再点“启动数据源”。确认“五类订阅就绪”，且“运行信息”显示 UDP 已绑定 `127.0.0.1:3334`，再回到工作台。
+2. 在仓库根目录另开 PowerShell，运行下方命令。工具会生成测试片并发送五秒红色画面，然后故意漏发下一帧的一个分片，暂停在回车提示。保持该终端开着。
+
+   ```powershell
+   .\simulator\.venv\Scripts\python.exe -m simulator.tools.video_loss_demo
+   ```
+
+3. 红色画面先显示“正在播放”，停发约一秒后应保留红色并标明“画面已过期”。打开“运行信息”，从零开始的会话应显示完整帧 300、丢帧 1（超时 1）、在途 0 帧、缓存 0 字节。尾帧排空后应显示已解码 300 帧、排队 0 帧。等待期间在网页“当前血量”填 321 并点“发送动态状态”，回到工作台确认血量更新，画面仍为过期的红色。
+4. 保持客户端会话开启，在发送工具的 PowerShell 窗口按回车。工作台应出现五秒蓝色画面并恢复“正在播放”。发送结束后蓝色末帧也会过期。此时完整帧和已解码帧均应到 600，超时仍为 1，在途、缓存和解码排队均回到 0。测试工具会自行退出，最后按下方结束步骤关闭自己启动的服务。
+
+同一回环丢片场景的自动检查会自行打开测试窗口、分配临时端口并截图。首次运行自动检查时，用 `.\simulator\.venv\Scripts\python.exe -m pip install -e "./simulator[test]"` 安装测试依赖。
+
+```powershell
+.\simulator\.venv\Scripts\python.exe tests/check_simulated_video_loss.py --configuration Debug
+```
+
 ### 复测 1080p60 录屏的超时与卡顿
 
 如果模拟器后端在更新代码前已启动，先在网页停止推流，运行 `.\simulator\scripts\stop.ps1`，再按上方步骤启动模拟器和新版步兵客户端。客户端进入“五类订阅就绪”后，在网页选 `demo-1080p60-hevc.mp4`、点“切换”，再开始推流。

@@ -5,6 +5,7 @@ Requires FFmpeg with libx264 and libx265 on PATH.
 """
 
 from pathlib import Path
+import re
 import socket
 import subprocess
 import sys
@@ -17,6 +18,7 @@ from simulator.server.hevc_annexb import HevcAnnexBFrameExtractor
 from simulator.server.video_datagrams import send_video_frame
 from simulator.server.video_streamer import VideoStreamer
 from simulator.tools.video_sender import send_video_as_hevc_udp
+from simulator.tools.video_loss_demo import make_clip, send_clip, send_incomplete
 
 
 def check(condition, message):
@@ -38,6 +40,41 @@ def check_known_bytes(capture):
     for packet in expected:
         check(capture.recv(65535) == packet, "Fixed big-endian wire sample mismatch")
     print("Fixed wire samples passed: 1400/9/9 bytes, frame IDs 65535/65535/0.")
+
+
+def check_loss_demo(capture):
+    red, blue = make_clip("red"), make_clip("blue")
+    for clip in (red, blue):
+        # Annex B start codes end in 00 00 01. Look inside the actual first AU.
+        types = [(m[1][0] >> 1) & 63 for m in re.finditer(b"\x00\x00\x01(.)", clip[0], re.DOTALL)]
+        check(types[:3] == [32, 33, 34] and any(t in (19, 20) for t in types), f"Missing VPS/SPS/PPS/IDR: {types}")
+    port = capture.getsockname()[1]
+    damaged_id = len(red)
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        before = send_clip(sock, port, 0, red)
+        fault = send_incomplete(sock, port, damaged_id, blue[0])
+        after = send_clip(sock, port, damaged_id + 1, blue)
+        source_port = sock.getsockname()[1]
+
+    # Derive the sequence and header bytes from the published layout directly,
+    # including the one gap inside the damaged frame and its full original size.
+    packet_count = 0
+    for frame_id, frame in enumerate([*red, blue[0], *blue]):
+        for index, offset in enumerate(range(0, len(frame), 1392)):
+            if frame_id == damaged_id and index == 1:
+                continue
+            raw, source = capture.recvfrom(65535)
+            header = frame_id.to_bytes(2, "big") + index.to_bytes(2, "big") + len(frame).to_bytes(4, "big")
+            check(raw == header + frame[offset:offset + 1392], f"Loss fixture frame {frame_id}, slice {index}")
+            check(source == ("127.0.0.1", source_port), f"Loss demo source changed to {source}")
+            packet_count += 1
+    slices = (len(blue[0]) + 1391) // 1392
+    check(fault == {"frameId": damaged_id, "frameBytes": len(blue[0]), "sliceCount": slices,
+                    "omittedSlice": 1, "sentPackets": slices - 1}, f"Incorrect loss report: {fault}")
+    check(packet_count == before + slices - 1 + after, "Loss demo packet counts changed")
+    print(f"Loss demo: {len(red)} red frames, frame {damaged_id} missing only slice 1/{slices} "
+          f"({len(blue[0])} bytes), {len(blue)} blue frames; {packet_count} exact datagrams, one source. "
+          "Both clips begin with VPS/SPS/PPS/IDR.")
 
 
 def check_incremental_extractor():
@@ -151,6 +188,7 @@ def main():
             capture.settimeout(10)
             target = capture.getsockname()
             check_known_bytes(capture)
+            check_loss_demo(capture)
             failed = subprocess.run([
                 sys.executable, "-X", "utf8", "-m", "simulator.tools.video_sender",
                 str(broken), target[0], str(target[1]),
