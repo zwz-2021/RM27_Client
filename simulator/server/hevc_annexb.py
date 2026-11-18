@@ -16,11 +16,13 @@ from typing import List, Union
 class HevcAnnexBFrameExtractor:
     def __init__(self) -> None:
         self._buffer = bytearray()
+        self._search_from = 0
         self._current_access_unit = bytearray()
         self._has_vcl = False
 
     def reset(self) -> None:
         self._buffer.clear()
+        self._search_from = 0
         self._current_access_unit.clear()
         self._has_vcl = False
 
@@ -42,13 +44,17 @@ class HevcAnnexBFrameExtractor:
                 del self._buffer[:start]
 
             next_start = self._find_start_code(
-                self._buffer, self._start_code_len(self._buffer, 0)
+                self._buffer, max(self._search_from, self._start_code_len(self._buffer, 0))
             )
             if next_start < 0:
+                # A four-byte start code may straddle reads. Everything before
+                # these last three bytes has already been searched.
+                self._search_from = max(0, len(self._buffer) - 3)
                 break
 
             nal = bytes(self._buffer[:next_start])
             del self._buffer[:next_start]
+            self._search_from = 0
             frames.extend(self._consume_nal(nal))
 
         return frames
@@ -64,6 +70,7 @@ class HevcAnnexBFrameExtractor:
                 frames.extend(self._consume_nal(bytes(self._buffer)))
 
         self._buffer.clear()
+        self._search_from = 0
 
         if self._current_access_unit:
             frames.append(bytes(self._current_access_unit))
@@ -98,20 +105,10 @@ class HevcAnnexBFrameExtractor:
 
     @staticmethod
     def _find_start_code(data: bytearray, start: int) -> int:
-        limit = len(data) - 3
-        index = max(0, start)
-        while index <= limit:
-            if data[index] == 0x00 and data[index + 1] == 0x00:
-                if data[index + 2] == 0x01:
-                    return index
-                if (
-                    index + 3 < len(data)
-                    and data[index + 2] == 0x00
-                    and data[index + 3] == 0x01
-                ):
-                    return index
-            index += 1
-        return -1
+        index = data.find(b"\x00\x00\x01", start)
+        if index > start and data[index - 1] == 0:
+            return index - 1
+        return index
 
     @staticmethod
     def _start_code_len(data: Union[bytes, bytearray], index: int) -> int:

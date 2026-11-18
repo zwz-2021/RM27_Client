@@ -9,9 +9,11 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from unittest.mock import patch
 
+from simulator.server.hevc_annexb import HevcAnnexBFrameExtractor
 from simulator.server.video_datagrams import send_video_frame
 from simulator.server.video_streamer import VideoStreamer
 from simulator.tools.video_sender import send_video_as_hevc_udp
@@ -36,6 +38,67 @@ def check_known_bytes(capture):
     for packet in expected:
         check(capture.recv(65535) == packet, "Fixed big-endian wire sample mismatch")
     print("Fixed wire samples passed: 1400/9/9 bytes, frame IDs 65535/65535/0.")
+
+
+def check_incremental_extractor():
+    # A large first slice spans many reads. A continuation slice belongs to the
+    # same frame; the prefix SEI after it belongs to the following frame.
+    vps = bytes.fromhex("00 00 00 01 40 01 11")
+    slice1 = bytes.fromhex("00 00 01 02 01 80") + b"x" * 120000
+    continuation = bytes.fromhex("00 00 00 01 02 01 00 33")
+    sei = bytes.fromhex("00 00 01 4e 01 44")
+    slice2 = bytes.fromhex("00 00 00 01 02 01 80 55")
+    expected = [vps + slice1 + continuation, sei + slice2, slice2]
+    stream = b"junk" + b"".join(expected)
+    extractor = HevcAnnexBFrameExtractor()
+    for chunk_size in (1, 3, 4096, 65536):
+        extractor.push(slice1[:-2])
+        extractor.reset()
+        frames = []
+        for offset in range(0, len(stream), chunk_size):
+            frames.extend(extractor.push(stream[offset:offset + chunk_size]))
+        frames.extend(extractor.flush())
+        check(frames == expected, f"Annex B frame changed with chunk size {chunk_size}")
+    print("Incremental Annex B: split prefixes, large NAL, multi-slice, reset and final frame passed.")
+
+
+def check_short_pipe_read(clip):
+    # The encoder keeps its pipe open after a few tiny pictures. The first
+    # picture must reach the receiver without waiting for 4096 bytes or EOF.
+    pictures = (bytes.fromhex("00 00 00 01 02 01 80 55"), bytes.fromhex("00 00 00 01 02 01 80 66"))
+    child = ("import sys, time; sys.stdout.buffer.write(bytes.fromhex(sys.argv[1])); "
+             "sys.stdout.buffer.flush(); time.sleep(30)")
+    popen = subprocess.Popen
+    sessions = iter(pictures)
+    def small_frames(_cmd, **kwargs):
+        return popen([sys.executable, "-c", child, (next(sessions) * 8).hex()], **kwargs)
+
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as capture:
+        capture.bind(("127.0.0.1", 0))
+        capture.settimeout(5)
+        streamer = VideoStreamer(*capture.getsockname())
+        stopped = threading.Event()
+        send_frame = streamer._send_frame
+        def stop_after_first(frame):
+            send_frame(frame)
+            if not stopped.is_set():
+                # Stop at a deterministic boundary inside a multi-frame pipe read.
+                streamer.stop_streaming()
+                stopped.set()
+
+        with patch("subprocess.Popen", small_frames):
+            try:
+                streamer._send_frame = stop_after_first
+                streamer.start()
+                check(streamer.set_video_file(str(clip)) and streamer.start_streaming(), "Small pipe setup failed")
+                check(capture.recv(65535) == bytes.fromhex("00 00 00 00 00 00 00 08") + pictures[0],
+                      "Small frame was not delivered from the live pipe")
+                check(stopped.wait(5) and streamer.start_streaming(), "Small pipe restart failed")
+                check(capture.recv(65535) == bytes.fromhex("00 01 00 00 00 00 00 08") + pictures[1],
+                      "A frame from the stopped read reached the new stream")
+            finally:
+                streamer.stop()
+    print("Short picture sent before EOF; stopping inside a read discarded the remaining old pictures.")
 
 
 def capture_frame(capture, expected_id):
@@ -72,6 +135,7 @@ def expect_web_failure(streamer, clip, message):
 
 
 def main():
+    check_incremental_extractor()
     with tempfile.TemporaryDirectory(prefix="rm27-video-udp-") as directory:
         clip = Path(directory) / "four-frames.mp4"
         broken = Path(directory) / "broken.mp4"
@@ -80,6 +144,7 @@ def main():
             "ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=blue:size=1920x1080:rate=60",
             "-frames:v", "4", "-c:v", "libx264", str(clip),
         ], check=True, timeout=20)
+        check_short_pipe_read(clip)
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as capture:
             capture.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
             capture.bind(("127.0.0.1", 0))

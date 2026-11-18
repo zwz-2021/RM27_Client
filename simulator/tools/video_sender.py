@@ -66,6 +66,9 @@ def send_video_as_hevc_udp(video_path: str, host: str, port: int, loop: bool = T
         if loop:
             ffmpeg_cmd += ["-stream_loop", "-1"]
         ffmpeg_cmd += [
+            # The input decoder drains and refills its frame threads on a loop.
+            "-threads",
+            "2",
             "-i",
             video_path,
             "-c:v",
@@ -79,6 +82,8 @@ def send_video_as_hevc_udp(video_path: str, host: str, port: int, loop: bool = T
             "-bsf:v",
             "hevc_mp4toannexb",
             "-an",
+            "-flush_packets",
+            "1",
             "-f",
             "hevc",
             "-",
@@ -95,7 +100,7 @@ def send_video_as_hevc_udp(video_path: str, host: str, port: int, loop: bool = T
         start_time = time.time()
 
         while True:
-            chunk = process.stdout.read(4096)
+            chunk = process.stdout.read1(64 * 1024)
             frames = extractor.push(chunk) if chunk else extractor.flush()
             for frame_data in frames:
                 num_slices, bytes_sent = send_video_frame(sock, (host, port), frame_count, frame_data)

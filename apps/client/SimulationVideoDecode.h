@@ -21,7 +21,7 @@ class SimulationVideoDecode final : public QObject {
     Q_PROPERTY(QString statusText READ displayStatus NOTIFY displayStateChanged)
     Q_PROPERTY(bool stale READ stale NOTIFY displayStateChanged)
 public:
-    SimulationVideoDecode(transport::UdpVideoReceiver &receiver, bool tracePixels);
+    SimulationVideoDecode(transport::UdpVideoReceiver &receiver, bool traceVideo);
     QVideoSink *videoSink() const { return sink_.data(); }
     void setVideoSink(QVideoSink *sink);
     QString displayStatus() const { return displayStatus_; }
@@ -35,6 +35,11 @@ signals:
 
 private:
     using Clock = std::chrono::steady_clock;
+    struct DisplayTiming {
+        qint64 intervals = 0;
+        qint64 over100ms = 0;
+        Clock::duration maxGap{};
+    };
     void queueFrame(video::DecodedVideoFrame frame);
     void presentLatest();
     void updateDisplay(const video::HevcStreamStatus &state, bool newFrame);
@@ -49,6 +54,9 @@ private:
     QPointer<QVideoSink> sink_;
     QVideoFrame currentFrame_;
     Clock::time_point lastInput_, lastOutput_;
+    const bool traceVideo_;
+    std::optional<Clock::time_point> previousPresentation_;
+    DisplayTiming displayTiming_, timingAtLastInput_;
     QString displayStatus_ = QStringLiteral("已停止");
     bool stale_ = false;
     // One replaceable worker output and at most one outstanding GUI wakeup.

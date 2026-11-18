@@ -10,6 +10,9 @@ inline constexpr int VideoHeaderBytes = 8;
 inline constexpr int MaxVideoDatagramBytes = 1400;
 inline constexpr int MaxFragmentBytes = MaxVideoDatagramBytes - VideoHeaderBytes;
 
+// OS socket queue target verified with the local simulation recording.
+inline constexpr int SimulationReceiveBufferBytes = 2 * 1024 * 1024;
+
 struct UdpVideoHeader {
     quint16 frameId;
     quint16 fragmentIndex;
@@ -44,6 +47,7 @@ struct UdpVideoStatus {
     QString bindAddress;
     quint16 bindPort = 0;
     QString error;
+    std::optional<int> simulationReceiveBufferBytes; // OS readback, <= 0 if unavailable.
 
     quint64 validPackets = 0;
     quint64 shortPackets = 0;

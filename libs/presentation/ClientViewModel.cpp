@@ -123,8 +123,18 @@ QString ClientViewModel::udpBindingText() const
 {
     const QString endpoint = QStringLiteral("%1:%2").arg(udpStatus_.bindAddress).arg(udpStatus_.bindPort);
     switch (udpStatus_.state) {
-    case video::UdpVideoState::Bound:
-        return QStringLiteral("已绑定 %1").arg(endpoint);
+    case video::UdpVideoState::Bound: {
+        QString text = QStringLiteral("已绑定 %1").arg(endpoint);
+        if (!udpStatus_.simulationReceiveBufferBytes)
+            return text;
+        const int actual = *udpStatus_.simulationReceiveBufferBytes;
+        if (actual <= 0)
+            return text + QStringLiteral(" · 无法读取系统 UDP 接收缓冲大小");
+        text += QStringLiteral(" · 系统 UDP 接收缓冲 %1 字节").arg(actual);
+        if (actual < video::SimulationReceiveBufferBytes)
+            text += QStringLiteral("（低于申请值 %1 字节，大帧可能缺片）").arg(video::SimulationReceiveBufferBytes);
+        return text;
+    }
     case video::UdpVideoState::BindFailed:
         return QStringLiteral("绑定失败 %1 · %2\n请检查本机网卡地址和端口占用，然后停止并重新启动数据源。")
             .arg(endpoint, udpStatus_.error);

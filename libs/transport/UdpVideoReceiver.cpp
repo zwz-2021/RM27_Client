@@ -1,6 +1,7 @@
 #include "transport/UdpVideoReceiver.h"
 
 #include <QUdpSocket>
+#include <QVariant>
 #include <QtEndian>
 
 namespace rm27::transport {
@@ -55,6 +56,17 @@ bool UdpVideoReceiver::start(const QString &bindAddress, quint16 port, bool asse
     if (!socket_->bind(address, port, QAbstractSocket::DontShareAddress)) {
         fail(UdpVideoState::BindFailed, socket_->errorString());
         return false;
+    }
+    if (assembleLocalSimulation && (address.isLoopback() || address == QHostAddress::AnyIPv4)) {
+        // A single recorded keyframe can arrive before the GUI gets another turn.
+        // Configure the native queue after bind creates the socket descriptor.
+        const auto option = QAbstractSocket::ReceiveBufferSizeSocketOption;
+        int actual = socket_->socketOption(option).toInt();
+        if (actual < video::SimulationReceiveBufferBytes) {
+            socket_->setSocketOption(option, video::SimulationReceiveBufferBytes);
+            actual = socket_->socketOption(option).toInt();
+        }
+        status_.simulationReceiveBufferBytes = actual;
     }
     status_.state = UdpVideoState::Bound;
     status_.bindPort = socket_->localPort();

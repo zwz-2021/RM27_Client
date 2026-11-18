@@ -52,6 +52,18 @@ $clip = 'simulator/resources/videos/demo-1080p60.hevc'
 .\simulator\.venv\Scripts\python.exe tests/check_simulated_video_display.py --configuration Debug
 ```
 
+### 复测 1080p60 录屏的超时与卡顿
+
+如果模拟器后端在更新代码前已启动，先在网页停止推流，运行 `.\simulator\scripts\stop.ps1`，再按上方步骤启动模拟器和新版步兵客户端。客户端进入“五类订阅就绪”后，在网页选 `demo-1080p60-hevc.mp4`、点“切换”，再开始推流。
+
+让 62.7 秒的录屏循环播放至少 65 秒，观察画面进入第二圈时是否连贯。在“运行信息”确认系统 UDP 接收缓冲的实际字节数，本机目标为 2,097,152。新会话中组帧超时应保持 0。网页停止推流后等尾帧排空，完整帧数和解码帧数应一致，解码栏应无缺参考帧错误。工作台应保留最后画面并标明过期。
+
+下面的自动检查使用临时端口和独立窗口，统计发送端和 Qt 显示控件两处超过 100 毫秒的间隔，并核对大帧收包。录屏放在本机 `simulator/resources/videos/`；其他机器可以用 `--recording` 指定含大帧的 1080p60 MP4。
+
+```powershell
+.\simulator\.venv\Scripts\python.exe tests/check_simulated_video_pacing.py --configuration Debug
+```
+
 ## 结束测试
 
 网页点“停止推流”，关闭自己打开的 Qt 窗口。若模拟器由你在本轮启动，再运行 `.\simulator\scripts\stop.ps1`。复用原来已在运行的服务时可以让它继续运行。

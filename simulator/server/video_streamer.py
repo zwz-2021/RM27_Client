@@ -250,13 +250,16 @@ class VideoStreamer:
             "ffmpeg",
             "-re",                       # 按原始帧率读取
             "-stream_loop", "-1",        # 循环播放
+            # Limit frames held by the input decoder when the recording loops.
+            "-threads", "2",
             "-i", self.current_video,
             "-c:v", "libx265",           # HEVC 编码
             "-preset", "ultrafast",      # 最快编码速度
             "-tune", "zerolatency",      # 零延迟
-            "-x265-params", "keyint=15:min-keyint=15:scenecut=0", # 强制固定 I 帧间隔 (0.5s @ 30fps)
+            "-x265-params", "keyint=15:min-keyint=15:scenecut=0",  # 每 15 帧一个关键帧
             "-bsf:v", "hevc_mp4toannexb", # 强制转换为 Annex B 格式 (包含 VPS/SPS/PPS)
             "-an",                       # 禁用音频
+            "-flush_packets", "1",
             "-f", "hevc",                # 输出格式为原始 HEVC
             "-"                          # 输出到 stdout
         ]
@@ -334,14 +337,19 @@ class VideoStreamer:
                 process = self.ffmpeg_process
                 if process is None:
                     continue
-                data = process.stdout.read(4096)
+                # A low-bitrate frame may be far shorter than one pipe read.
+                data = process.stdout.read1(64 * 1024)
                 if not self.is_streaming or self.ffmpeg_process is not process:
                     continue
 
+                frames = self.frame_extractor.push(data) if data else self.frame_extractor.flush()
+                for frame in frames:
+                    if not self.is_streaming or self.ffmpeg_process is not process:
+                        break
+                    self._send_frame(frame)
+                    sent_frame = True
+
                 if not data:
-                    for frame in self.frame_extractor.flush():
-                        self._send_frame(frame)
-                        sent_frame = True
                     code = process.wait(timeout=2)
                     if code:
                         self._fail_stream(process, f"FFmpeg 未能完成视频转码（退出码 {code}），请检查视频文件。")
@@ -350,10 +358,6 @@ class VideoStreamer:
                     else:
                         self._stop_ffmpeg()
                     continue
-
-                for frame in self.frame_extractor.push(data):
-                    self._send_frame(frame)
-                    sent_frame = True
 
             except Exception as e:
                 self._fail_stream(process, f"图传发送失败：{e}")

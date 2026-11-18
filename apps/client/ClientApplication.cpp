@@ -72,7 +72,7 @@ int ClientApplication::run(QGuiApplication &app)
     parser.addOption({QStringLiteral("log-dir"), QStringLiteral("Override log directory"),
                       QStringLiteral("path")});
     parser.addOption({QStringLiteral("trace-simulated-video"),
-                      QStringLiteral("Log pixel hashes for the first 32 decoded frames of each local simulation session")});
+                      QStringLiteral("Log the first 32 decoded pixel hashes and a display timing summary for local simulation")});
     parser.process(app);
 
     const QString configPath = parser.value(QStringLiteral("config"));

@@ -40,7 +40,8 @@ constexpr auto FrameTimeout = std::chrono::seconds(1);
 
 } // namespace
 
-SimulationVideoDecode::SimulationVideoDecode(transport::UdpVideoReceiver &receiver, bool tracePixels)
+SimulationVideoDecode::SimulationVideoDecode(transport::UdpVideoReceiver &receiver, bool traceVideo)
+    : traceVideo_(traceVideo)
 {
     refresh_.setInterval(100);
     connect(&refresh_, &QTimer::timeout, this, [this] {
@@ -48,7 +49,7 @@ SimulationVideoDecode::SimulationVideoDecode(transport::UdpVideoReceiver &receiv
         updateDisplay(state, false);
         emit statusChanged(statusText(state));
     });
-    connect(&receiver, &transport::UdpVideoReceiver::statusChanged, this, [this, &receiver, tracePixels] {
+    connect(&receiver, &transport::UdpVideoReceiver::statusChanged, this, [this, &receiver] {
         if (receiver.status().state != video::UdpVideoState::Bound) {
             stop();
             if (receiver.status().state == video::UdpVideoState::BindFailed)
@@ -59,8 +60,8 @@ SimulationVideoDecode::SimulationVideoDecode(transport::UdpVideoReceiver &receiv
         }
         if (refresh_.isActive())
             return;
-        decoder_.start([this, tracePixels](video::DecodedVideoFrame frame) {
-            if (tracePixels && sample_.size() < 32) {
+        decoder_.start([this](video::DecodedVideoFrame frame) {
+            if (traceVideo_ && sample_.size() < 32) {
                 const auto hash = QCryptographicHash::hash(frame.pixels, QCryptographicHash::Sha256).toHex();
                 const QJsonObject data{{"index", frame.index}, {"width", frame.width}, {"height", frame.height},
                                        {"sha256", QString::fromLatin1(hash)}};
@@ -85,6 +86,10 @@ SimulationVideoDecode::SimulationVideoDecode(transport::UdpVideoReceiver &receiv
         }
         if (decoder_.submit(bytes)) {
             lastInput_ = Clock::now();
+            // Stop at the last accepted input. FFmpeg can return delayed pictures
+            // during idle drain, after playback of this recording has stopped.
+            if (traceVideo_)
+                timingAtLastInput_ = displayTiming_;
             address_ = address;
             port_ = port;
         }
@@ -97,6 +102,7 @@ void SimulationVideoDecode::setVideoSink(QVideoSink *sink)
         return;
     if (sink_)
         sink_->setVideoFrame({});
+    previousPresentation_.reset();
     sink_ = sink;
     if (sink_)
         sink_->setVideoFrame(currentFrame_);
@@ -126,8 +132,20 @@ void SimulationVideoDecode::presentLatest()
         lastOutput_ = pendingSince_;
     }
     currentFrame_ = QVideoFrame(std::make_unique<SimulationPixelBuffer>(std::move(*frame)));
-    if (sink_)
+    if (sink_) {
         sink_->setVideoFrame(currentFrame_);
+        if (traceVideo_) {
+            const auto presented = Clock::now();
+            if (previousPresentation_) {
+                const auto gap = presented - *previousPresentation_;
+                ++displayTiming_.intervals;
+                if (gap > std::chrono::milliseconds(100))
+                    ++displayTiming_.over100ms;
+                displayTiming_.maxGap = qMax(displayTiming_.maxGap, gap);
+            }
+            previousPresentation_ = presented;
+        }
+    }
     updateDisplay(decoder_.status(), true);
 }
 
@@ -189,6 +207,16 @@ void SimulationVideoDecode::stop()
             sink_->setVideoFrame({});
         for (const auto &frame : sample_)
             emit logRecord(QStringLiteral("info"), QStringLiteral("video.decode_frame"), frame);
+        if (traceVideo_) {
+            const auto &timing = timingAtLastInput_;
+            const QJsonObject data{{"intervals", timing.intervals}, {"over100ms", timing.over100ms},
+                {"maxGapMs", std::chrono::duration<double, std::milli>(timing.maxGap).count()}};
+            emit logRecord(QStringLiteral("info"), QStringLiteral("video.display_timing"),
+                           QString::fromUtf8(QJsonDocument(data).toJson(QJsonDocument::Compact)));
+            previousPresentation_.reset();
+            displayTiming_ = {};
+            timingAtLastInput_ = {};
+        }
         emit logRecord(last.error.isEmpty() && last.diagnostic.isEmpty() ? QStringLiteral("info") : QStringLiteral("warning"),
                        QStringLiteral("video.decode_summary"), statusText(last));
         sample_.clear();

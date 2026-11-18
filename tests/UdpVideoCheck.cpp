@@ -13,6 +13,7 @@ private slots:
     void wireSamples();
     void exclusiveBindAndRestart();
     void burst();
+    void simulationKeyframeBurst();
     void assembleSimulationBytes();
     void assemblySessionBoundary();
 };
@@ -113,6 +114,39 @@ void UdpVideoCheck::burst()
     QVERIFY(changes.count() < 96);
 }
 
+void UdpVideoCheck::simulationKeyframeBurst()
+{
+    UdpVideoReceiver receiver;
+    const QString address = QStringLiteral("127.0.0.1");
+    const auto &status = receiver.status();
+    QSignalSpy frames(&receiver, &UdpVideoReceiver::frameAssembled);
+    QUdpSocket sender;
+    quint16 port = 0;
+    for (int session = 0; session < 2; ++session) {
+        QVERIFY(receiver.start(address, port, true));
+        port = status.bindPort;
+        QVERIFY(status.simulationReceiveBufferBytes.value_or(0) > 0);
+
+        // The recording's 202257-byte keyframe takes 145 full fragments plus
+        // a 417-byte tail. Do not pump GUI events until the entire burst is sent.
+        QByteArray expected;
+        for (int index = 0; index < 146; ++index) {
+            const QByteArray payload(index == 145 ? 417 : 1392, static_cast<char>(index + session));
+            QByteArray datagram = QByteArray::fromHex("1234 0000 00031611");
+            datagram[3] = static_cast<char>(index);
+            datagram += payload;
+            expected += payload;
+            QCOMPARE(sender.writeDatagram(datagram, QHostAddress::LocalHost, port), datagram.size());
+        }
+        QTRY_COMPARE(frames.size(), 1);
+        QCOMPARE(frames.takeFirst().at(1).toByteArray(), expected);
+        QCOMPARE(status.validPackets, 146ULL);
+        QCOMPARE(status.assembly.droppedFrames(), 0ULL);
+        receiver.stop();
+        QVERIFY(!status.simulationReceiveBufferBytes);
+    }
+}
+
 void UdpVideoCheck::assembleSimulationBytes()
 {
     UdpVideoReceiver receiver;
@@ -177,6 +211,7 @@ void UdpVideoCheck::assemblySessionBoundary()
     };
 
     QVERIFY(receiver.start(address, 0)); // header-only reception
+    QVERIFY(!status.simulationReceiveBufferBytes);
     const quint16 port = status.bindPort;
     send("0000 0000 00000001 01");
     QTRY_COMPARE(status.validPackets, 1ULL);
