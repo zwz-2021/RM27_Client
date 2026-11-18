@@ -1,4 +1,4 @@
-"""在本机回环演示已知画面、缺一片并暂停、完整新片段恢复。"""
+"""在本机回环用红、蓝合成录屏演示视频缺片与恢复。"""
 
 import argparse
 import re
@@ -11,6 +11,8 @@ from simulator.server.video_datagrams import send_video_frame
 
 
 FPS = 60
+LOSS_GROUPS = 16
+LOSS_GROUP_SIZE = 12
 
 
 def make_clip(color: str) -> list[bytes]:
@@ -80,10 +82,24 @@ def send_incomplete(sock: socket.socket, port: int, frame_id: int, frame: bytes)
             "omittedSlice": omitted, "sentPackets": len(datagrams) - 1}
 
 
+def send_loss_series(sock: socket.socket, port: int, first_id: int, frame: bytes) -> list[dict]:
+    """每组连续发出十二个各缺一片的帧，给上一组留出半秒的回收时间。"""
+    manifest = []
+    for group in range(LOSS_GROUPS):
+        if group:
+            time.sleep(0.5)
+        for offset in range(LOSS_GROUP_SIZE):
+            frame_id = first_id + group * LOSS_GROUP_SIZE + offset
+            manifest.append(send_incomplete(sock, port, frame_id, frame))
+    return manifest
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=3334, help="本机客户端的 UDP 端口，默认 3334")
-    parser.add_argument("--wait-for-keyframe", action="store_true", help="恢复前先发缺少参数集和起始关键帧的普通蓝帧")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--wait-for-keyframe", action="store_true", help="恢复前先发缺少参数集和起始关键帧的普通蓝帧")
+    mode.add_argument("--consecutive-loss", action="store_true", help="连续发送多组各缺一片的帧，观察过期画面和缓存回收")
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("端口应在 1 至 65535 之间")
@@ -95,12 +111,20 @@ def main():
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         print(f"向 127.0.0.1:{args.port} 发送五秒红色画面。", flush=True)
         send_clip(sock, args.port, 0, red, loops)
-        loss = send_incomplete(sock, args.port, damaged_id, blue[0])
-        print(f"第 {damaged_id} 帧共 {loss['sliceCount']} 片，已故意漏发片号 {loss['omittedSlice']}。"
-              "图传已暂停，等待末帧过期。", flush=True)
+        if args.consecutive_loss:
+            print(f"开始发送 {LOSS_GROUPS} 组缺片样本，每组 {LOSS_GROUP_SIZE} 帧。"
+                  "请观察红色末帧过期，并在网页更改血量，查看工作台是否更新。", flush=True)
+            manifest = send_loss_series(sock, args.port, damaged_id, blue[0])
+            next_id = damaged_id + len(manifest)
+            print(f"已发完帧号 {damaged_id} 至 {next_id - 1} 的 {len(manifest)} 个缺片帧，每帧漏发片号 1。"
+                  "请在运行信息查看超时、超出预算和在途帧数。", flush=True)
+        else:
+            loss = send_incomplete(sock, args.port, damaged_id, blue[0])
+            next_id = damaged_id + 1
+            print(f"第 {damaged_id} 帧共 {loss['sliceCount']} 片，已故意漏发片号 {loss['omittedSlice']}。"
+                  "图传已暂停，等待末帧过期。", flush=True)
         time.sleep(2)
         input("请检查红色末帧过期、组帧超时及网页血量更新。确认后在这里按回车继续。")
-        next_id = damaged_id + 1
         if ordinary:
             count = len(ordinary) * loops
             print(f"约五秒内连续发送 {count} 个普通蓝帧，缺少参数集和起始关键帧。"

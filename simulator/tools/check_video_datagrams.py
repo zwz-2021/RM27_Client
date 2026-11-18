@@ -4,8 +4,13 @@ Run from the repository root: python -m simulator.tools.check_video_datagrams
 Requires FFmpeg with libx264 and libx265 on PATH.
 """
 
+import argparse
+from concurrent.futures import ThreadPoolExecutor
+import hashlib
+import json
 from pathlib import Path
 import re
+import select
 import socket
 import subprocess
 import sys
@@ -18,7 +23,7 @@ from simulator.server.hevc_annexb import HevcAnnexBFrameExtractor
 from simulator.server.video_datagrams import send_video_frame
 from simulator.server.video_streamer import VideoStreamer
 from simulator.tools.video_sender import send_video_as_hevc_udp
-from simulator.tools.video_loss_demo import dependent_frames, make_clip, send_clip, send_incomplete
+from simulator.tools.video_loss_demo import dependent_frames, make_clip, send_clip, send_incomplete, send_loss_series
 
 
 def check(condition, message):
@@ -42,8 +47,8 @@ def check_known_bytes(capture):
     print("Fixed wire samples passed: 1400/9/9 bytes, frame IDs 65535/65535/0.")
 
 
-def check_loss_demo(capture):
-    red, blue = make_clip("red"), make_clip("blue")
+def check_loss_demo(capture, blue):
+    red = make_clip("red")
     for clip in (red, blue):
         # Annex B start codes end in 00 00 01. Look inside the actual first AU.
         types = [(m[1][0] >> 1) & 63 for m in re.finditer(b"\x00\x00\x01(.)", clip[0], re.DOTALL)]
@@ -88,6 +93,54 @@ def check_loss_demo(capture):
           f"({len(blue[0])} bytes), {len(ordinary)} dependent AUs, {len(blue)} blue frames; "
           f"{packet_count} exact datagrams, one source. Both clips begin with VPS/SPS/PPS/IDR. "
           f"Fresh FFmpeg decoded 0 pictures from dependent AUs and {len(pixels)} from the full blue clip.")
+
+
+def check_loss_series(capture, frame, report_path):
+    # Use the protocol's 2/2/4-byte header and the original blue AU as the wire oracle.
+    # The fault schedule is part of this local fixture, including its zero-based slice IDs.
+    first_id = 65530
+    frame_ids = [(first_id + offset) % 65536 for offset in range(16 * 12)]
+    pieces = [frame[start:start + 1392] for start in range(0, len(frame), 1392)]
+    check(len(pieces) >= 2, "Loss series requires a multi-slice recording")
+    received_slices = [index for index in range(len(pieces)) if index != 1]
+    frames = []
+    wire_report = []
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender, ThreadPoolExecutor(max_workers=1) as pool:
+        sender.bind(("127.0.0.1", 0))
+        source = sender.getsockname()
+        started = time.monotonic()
+        transfer = pool.submit(send_loss_series, sender, capture.getsockname()[1], first_id, frame)
+        for offset, frame_id in enumerate(frame_ids):
+            observed = []
+            for index in received_slices:
+                data, peer = capture.recvfrom(65535)
+                arrived = time.monotonic()
+                check(peer == source, f"Unexpected loss series source {peer}, expected {source}")
+                header = frame_id.to_bytes(2, "big") + index.to_bytes(2, "big") + len(frame).to_bytes(4, "big")
+                check(data == header + pieces[index], f"Loss series byte mismatch at frame {frame_id} slice {index}")
+                if not observed:
+                    first_arrival_ms = round((arrived - started) * 1000, 3)
+                observed.append(int.from_bytes(data[2:4], "big"))
+            wire_row = {"frameId": frame_id, "frameBytes": len(frame), "sliceCount": len(pieces),
+                        "omittedSlice": 1, "sentPackets": len(observed)}
+            wire_report.append(wire_row)
+            frames.append({**wire_row, "group": offset // 12 + 1, "receivedSlices": observed,
+                           "firstPacketAtMs": first_arrival_ms})
+        check(transfer.result(timeout=15) == wire_report, "Sender loss manifest differs from the loopback capture")
+        check(not select.select([capture], [], [], 0.1)[0], "Unexpected trailing loss-series datagram")
+
+    group_starts = [row["firstPacketAtMs"] for row in frames[::12]]
+    gaps = [round(b - a, 3) for a, b in zip(group_starts, group_starts[1:])]
+    check(min(gaps) >= 250, f"Separate loss groups overlapped the local 250 ms timeout: {gaps}")
+    count = sum(len(row["receivedSlices"]) for row in frames)
+    if report_path:
+        report = {"source": list(source), "destination": list(capture.getsockname()),
+                  "originalFrameSha256": hashlib.sha256(frame).hexdigest(), "receivedPackets": count,
+                  "groupStartIntervalsMs": gaps, "frames": frames}
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(f"Repeated loss: 16 groups of 12 frames, each missing slice 1; {count} exact datagrams, "
+          f"one source, no extras. Observed group intervals {min(gaps):.1f} to {max(gaps):.1f} ms.")
 
 
 def check_incremental_extractor():
@@ -185,6 +238,10 @@ def expect_web_failure(streamer, clip, message):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--loss-series-report", type=Path, metavar="JSON",
+                        help="write the independent per-frame loopback capture for the repeated loss fixture")
+    args = parser.parse_args()
     check_incremental_extractor()
     with tempfile.TemporaryDirectory(prefix="rm27-video-udp-") as directory:
         clip = Path(directory) / "four-frames.mp4"
@@ -201,7 +258,9 @@ def main():
             capture.settimeout(10)
             target = capture.getsockname()
             check_known_bytes(capture)
-            check_loss_demo(capture)
+            blue = make_clip("blue")
+            check_loss_demo(capture, blue)
+            check_loss_series(capture, blue[0], args.loss_series_report)
             failed = subprocess.run([
                 sys.executable, "-X", "utf8", "-m", "simulator.tools.video_sender",
                 str(broken), target[0], str(target[1]),

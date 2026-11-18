@@ -24,7 +24,7 @@ from simulator.protocol.rm27_base_pb2 import RobotDynamicStatus
 from simulator.server.app import create_app
 from simulator.server.main import build_parser
 from simulator.tools.smoke_test import check_stopped
-from simulator.tools.video_loss_demo import dependent_frames, make_clip, send_clip, send_incomplete
+from simulator.tools.video_loss_demo import dependent_frames, make_clip, send_clip, send_incomplete, send_loss_series
 
 
 @asynccontextmanager
@@ -84,13 +84,15 @@ async def sending(transfer, *args):
         await task
 
 
-async def expect_drained(window, description, packets, assembled, decoded, last_frame, source_port, *, failed=False):
+async def expect_drained(window, description, packets, assembled, decoded, last_frame, source_port, *,
+                         timeouts=1, over_budget=0, failed=False):
     await window.action("diagnosticsTab")
     # A recovered segment can retain an FFmpeg diagnostic from before its first decodable frame.
     detail = r"\n解码错误 · [^\n]+" if failed else r"(?:\nFFmpeg 最近诊断 · [^\n]+)?$"
     await window.observe(description, udpCountersLabel=rf"^有效包 {packets} · 丢弃 0\b",
                          udpLastFrameLabel=rf"帧号 {last_frame} · .*来源 127\.0\.0\.1:{source_port}\b",
-                         udpAssemblyLabel=rf"(?s)完整帧 {assembled} · 丢帧 1（超时 1 · 冲突 0 · 超出预算 0）"
+                         udpAssemblyLabel=rf"(?s)完整帧 {assembled} · 丢帧 {timeouts + over_budget}"
+                                          rf"（超时 {timeouts} · 冲突 0 · 超出预算 {over_budget}）"
                                           r".*在途 0 帧 · 缓存 0 字节（0 片）",
                          videoDecodeLabel=rf"等待输入 · 已解码 {decoded} 帧 · 1920×1080"
                                           r" · 排队 0 帧 / 0 字节 · 输入丢弃 0 帧" + detail)
@@ -112,11 +114,73 @@ async def expect_waiting(window, description, capture_name, decoded):
     return capture, {"frames": frames, "bytes": size}
 
 
-async def verify(configuration, evidence):
+async def check_stale_red(window, set_health):
+    await window.observe("last red picture marked stale", videoPreviewStatus="^画面已过期$")
+    await set_health(322)
+    await window.observe("new MQTT value during video loss", videoPreviewStatus="^画面已过期$",
+                         healthValue="^322$", connectionValue="^五类订阅就绪$")
+    return await expect_pixels(window, "stale-red", [[RED] * 4])
+
+
+async def check_loss_series(window, sender, port, red_count, frame, red_packets, set_health, captures):
+    # Independent of the sender's report. The local fixture omits slice 1 of a 1392-byte split.
+    pieces = [frame[offset:offset + 1392] for offset in range(0, len(frame), 1392)]
+    kept = pieces[:1] + pieces[2:]
+    peak_bytes, peak_fragments = 8 * sum(map(len, kept)), 8 * len(kept)
+    async with sending(send_loss_series, sender, port, red_count, frame) as transfer:
+        await window.action("diagnosticsTab")
+        await window.observe("eight simultaneous incomplete frames retained at the local budget",
+                             udpAssemblyLabel=rf"(?s)完整帧 {red_count} · .*在途 8 帧 · 缓存 {peak_bytes} 字节（{peak_fragments} 片）",
+                             udpLastFrameLabel=rf"帧号 {red_count - 1} ·")
+        await window.action("overviewTab")
+        captures.append(await check_stale_red(window, set_health))
+        require(not transfer.done(), "The loss series ended before the stale preview and new MQTT value were observed")
+
+    manifest = transfer.result()
+    json_file(window.evidence / "sent-omissions.json", manifest)
+    damaged_count = 16 * 12
+    require([row["frameId"] for row in manifest] == list(range(red_count, red_count + damaged_count))
+            and all(row["omittedSlice"] == 1 and row["sentPackets"] == len(kept) for row in manifest),
+            "Unexpected frames or fragment counts in the consecutive loss series")
+    received = red_packets + damaged_count * len(kept)
+    timeouts, over_budget = 16 * 8, 16 * 4
+    await expect_drained(window, "all 16 groups accounted for and buffers empty before the blue recording",
+                         received, red_count, red_count, red_count - 1, sender.getsockname()[1],
+                         timeouts=timeouts, over_budget=over_budget)
+    return {"damagedFrames": damaged_count, "omissionsFile": "sent-omissions.json",
+            "observedPendingPeak": {"frames": 8, "bytes": peak_bytes, "fragments": peak_fragments},
+            "assemblyTimeouts": timeouts, "assemblyOverBudget": over_budget}, received
+
+
+async def check_missing_start(window, sender, port, red_count, blue, plain, red_packets, set_health, captures):
+    source_port = sender.getsockname()[1]
+    loss = send_incomplete(sender, port, red_count, blue[0])
+    require(loss["sentPackets"] == loss["sliceCount"] - 1 and loss["sentPackets"] > 0,
+            f"Fixture did not omit exactly one fragment: {loss}")
+    received = red_packets + loss["sentPackets"]
+    await expect_drained(window, "one timeout during silence; only red frames decoded",
+                         received, red_count, red_count, red_count - 1, source_port)
+    captures.append(await check_stale_red(window, set_health))
+    async with sending(send_clip, sender, port, red_count + 1, plain) as prefix:
+        capture, first_queue = await expect_waiting(window, "ordinary blue frames over stale red",
+                                                    "waiting-red", red_count)
+        captures.append(capture)
+    received += prefix.result()
+    assembled = red_count + len(plain)
+    await expect_drained(window, "ordinary frames assembled but no new picture before drain",
+                         received, assembled, red_count, assembled, source_port, failed=True)
+    await window.observe("decoder failure remains visible over the stale red picture",
+                         videoPreviewStatus="^画面已过期 · 解码失败，请查看运行信息$")
+    captures.append(await expect_pixels(window, "undecodable-red", [[RED] * 4]))
+    return {"damagedFrames": 1, "omission": loss, "assemblyTimeouts": 1, "assemblyOverBudget": 0,
+            "ordinaryFramesBeforeSilence": len(plain), "ordinaryFramesImmediatelyBeforeKeyframe": len(plain),
+            "waitingQueueSamples": {"first": first_queue}}, received
+
+
+async def verify(configuration, evidence, consecutive_loss=False):
     red, blue = make_clip("red"), make_clip("blue")
-    plain = dependent_frames(blue)
-    loops = 4
-    red_count, blue_count, plain_count = len(red) * loops, len(blue) * loops, len(plain) * loops
+    loops = 5 if consecutive_loss else 4  # Match the five-second colour stages of the manual loss series.
+    red_count, blue_count = len(red) * loops, len(blue) * loops
     with exclusive_udp(0) as reservation:
         port = reservation.getsockname()[1]
     broker = Broker({
@@ -144,47 +208,28 @@ async def verify(configuration, evidence):
             with exclusive_udp(0) as sender:
                 source_port = sender.getsockname()[1]
 
-                def red_then_loss():
-                    complete = send_clip(sender, port, 0, red, loops)
-                    loss = send_incomplete(sender, port, red_count, blue[0])
-                    return complete, loss
-
-                async with sending(red_then_loss) as initial:
+                async with sending(send_clip, sender, port, 0, red, loops) as initial:
                     await window.observe("red clip is playing before loss", videoPreviewStatus="^正在播放$",
                                          healthValue="^321$")
                     captures.append(await expect_pixels(window, "playing-red", [[RED] * 4]))
-                red_packets, loss = initial.result()
-                require(loss["sentPackets"] == loss["sliceCount"] - 1 and loss["sentPackets"] > 0,
-                        f"Fixture did not omit exactly one fragment: {loss}")
-                pre_recovery_packets = red_packets + loss["sentPackets"]
-                await expect_drained(window, "one timeout during silence; only red frames decoded",
-                                     pre_recovery_packets, red_count, red_count, red_count - 1, source_port)
-                await window.observe("last red picture marked stale", videoPreviewStatus="^画面已过期$")
-                await set_health(322)
-                await window.observe("new MQTT value during video loss", videoPreviewStatus="^画面已过期$",
-                                     healthValue="^322$", connectionValue="^五类订阅就绪$")
-                captures.append(await expect_pixels(window, "stale-red", [[RED] * 4]))
-
-                async with sending(send_clip, sender, port, red_count + 1, plain, loops) as prefix:
-                    capture, first_queue = await expect_waiting(window, "ordinary blue frames over stale red",
-                                                                "waiting-red", red_count)
-                    captures.append(capture)
-                pre_recovery_packets += prefix.result()
-                assembled_before_restart = red_count + plain_count
-                await expect_drained(window, "ordinary frames assembled but no new picture before drain",
-                                     pre_recovery_packets, assembled_before_restart, red_count,
-                                     assembled_before_restart, source_port, failed=True)
-                await window.observe("decoder failure remains visible over the stale red picture",
-                                     videoPreviewStatus="^画面已过期 · 解码失败，请查看运行信息$")
-                captures.append(await expect_pixels(window, "undecodable-red", [[RED] * 4]))
-
-                # A second prefix and the complete clip share one pacing clock. There is no idle
-                # drain between ordinary frames and the independent blue frame that follows them.
-                recovery = plain * loops + blue * loops
-                async with sending(send_clip, sender, port, assembled_before_restart + 1, recovery) as restored:
-                    capture, retry_queue = await expect_waiting(window, "retry replaces old failure with waiting",
-                                                                "waiting-again-red", red_count)
-                    captures.append(capture)
+                red_packets = initial.result()
+                plain = []
+                if consecutive_loss:
+                    fault, pre_recovery_packets = await check_loss_series(
+                        window, sender, port, red_count, blue[0], red_packets, set_health, captures)
+                else:
+                    plain = dependent_frames(blue) * loops
+                    fault, pre_recovery_packets = await check_missing_start(
+                        window, sender, port, red_count, blue, plain, red_packets, set_health, captures)
+                assembled_before_restart = red_count + len(plain)
+                next_id = assembled_before_restart + fault["damagedFrames"]
+                recovery = plain + blue * loops  # No idle drain between a dependent prefix and the keyframe.
+                async with sending(send_clip, sender, port, next_id, recovery) as restored:
+                    if not consecutive_loss:
+                        capture, retry_queue = await expect_waiting(window, "retry replaces old failure with waiting",
+                                                                    "waiting-again-red", red_count)
+                        captures.append(capture)
+                        fault["waitingQueueSamples"]["retry"] = retry_queue
                     await window.observe("new clip playing in the same session", videoPreviewStatus="^正在播放$")
                     await set_health(323)
                     await window.observe("third MQTT value during recovery", videoPreviewStatus="^正在播放$",
@@ -193,8 +238,9 @@ async def verify(configuration, evidence):
                 total_packets = pre_recovery_packets + restored.result()
                 assembled = assembled_before_restart + len(recovery)
                 decoded = red_count + blue_count
-                await expect_drained(window, "all complete blue frames decoded; no second timeout or backlog",
-                                     total_packets, assembled, decoded, assembled, source_port)
+                await expect_drained(window, "all complete blue frames decoded; no extra losses or backlog",
+                                     total_packets, assembled, decoded, next_id + len(recovery) - 1, source_port,
+                                     timeouts=fault["assemblyTimeouts"], over_budget=fault["assemblyOverBudget"])
             await window.action("stopButton")
             await window.observe("receive session stopped", connectionValue="^已停止$", videoPreviewStatus="^已停止$")
             captures.append(await expect_pixels(window, "stopped", [EMPTY], tolerance=5))
@@ -213,10 +259,8 @@ async def verify(configuration, evidence):
             with socket.socket() as probe:
                 probe.settimeout(1)
                 require(probe.connect_ex(("127.0.0.1", tcp_port)) != 0, f"Listener still on port {tcp_port}")
-    return {"redFrames": red_count, "omission": loss, "ordinaryFramesBeforeSilence": plain_count,
-            "ordinaryFramesImmediatelyBeforeKeyframe": plain_count, "recoveredBlueFrames": blue_count,
-            "waitingQueueSamples": {"first": first_queue, "retry": retry_queue},
-            "receivedPackets": total_packets, "assemblyTimeouts": 1, "assembledFrames": assembled,
+    return {"redFrames": red_count, **fault, "recoveredBlueFrames": blue_count,
+            "receivedPackets": total_packets, "assembledFrames": assembled,
             "decodedFrames": decoded,
             "pendingFragments": 0, "bufferedBytes": 0, "decoderQueuedBytes": 0, "captures": captures,
             "mqttHealthInWindow": [321, 322, 323], "clientBusinessPublishes": 0,
@@ -226,15 +270,17 @@ async def verify(configuration, evidence):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--configuration", choices=("Debug", "Release"), default="Debug")
+    parser.add_argument("--consecutive-loss", action="store_true", help="Exercise 16 groups of incomplete loopback frames")
     options = parser.parse_args()
     directory = ROOT / "logs" / datetime.now().strftime("check-simulated-loss-%Y%m%d-%H%M%S-%f")
     directory.mkdir(parents=True)
     print(f"Qt fragment-loss evidence: {directory}", flush=True)
-    result = {"passed": False, "configuration": options.configuration, "entry": "scripts/run.ps1"}
+    result = {"passed": False, "configuration": options.configuration, "entry": "scripts/run.ps1",
+              "scenario": "consecutive-loss" if options.consecutive_loss else "missing-start"}
     try:
-        result.update(asyncio.run(verify(options.configuration, directory)))
+        result.update(asyncio.run(verify(options.configuration, directory, options.consecutive_loss)))
         result["passed"] = True
-        print("PASS: stale red pixels during undecodable input, visible diagnostics, live MQTT and blue recovery.")
+        print("PASS: stale red pixels, expected loss diagnostics, live MQTT and blue recovery.")
     except Exception:
         result["error"] = traceback.format_exc()
         print(result["error"], file=sys.stderr)
