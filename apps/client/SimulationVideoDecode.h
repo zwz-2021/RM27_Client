@@ -3,6 +3,7 @@
 #include "video/HevcStreamDecoder.h"
 #include "transport/OneSecondCountWindow.h"
 #include <QObject>
+#include <QJsonObject>
 #include <QPointer>
 #include <QStringList>
 #include <QTimer>
@@ -27,6 +28,8 @@ public:
     void setVideoSink(QVideoSink *sink);
     QString displayStatus() const { return displayStatus_; }
     bool stale() const { return stale_; }
+    // Owner-thread diagnostic sampling; never includes pixels or free-form errors.
+    QJsonObject diagnosticSnapshot();
 
 signals:
     void videoSinkChanged();

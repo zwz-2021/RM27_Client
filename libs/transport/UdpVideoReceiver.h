@@ -18,6 +18,8 @@ public:
     bool start(const QString &bindAddress, quint16 port, bool assembleLocalSimulation = false);
     void stop();
     const video::UdpVideoStatus &status() const { return status_; }
+    // Owner thread only: sample the windows now, independent of UI notification cadence.
+    video::UdpVideoStatus diagnosticStatus();
 
 signals:
     void statusChanged();

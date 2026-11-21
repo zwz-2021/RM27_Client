@@ -27,6 +27,8 @@ class ClientViewModel : public QObject {
     Q_PROPERTY(QString elapsedText READ elapsedText NOTIFY snapshotChanged)
     Q_PROPERTY(QString startupError READ startupError CONSTANT)
     Q_PROPERTY(QString logPath READ logPath CONSTANT)
+    Q_PROPERTY(bool snapshotSaving READ snapshotSaving NOTIFY snapshotSaveChanged)
+    Q_PROPERTY(QString snapshotSaveFeedback READ snapshotSaveFeedback NOTIFY snapshotSaveChanged)
     Q_PROPERTY(bool preview READ preview CONSTANT)
     Q_PROPERTY(QString sourceText READ sourceText NOTIFY identityChanged)
     Q_PROPERTY(QString seatText READ seatText NOTIFY identityChanged)
@@ -75,6 +77,10 @@ public:
     QString elapsedText() const;
     QString startupError() const;
     QString logPath() const;
+    bool snapshotSaving() const { return snapshotSaving_; }
+    QString snapshotSaveFeedback() const { return snapshotSaveFeedback_; }
+    void setDiagnosticSnapshotSaver(std::function<void()> save);
+    void finishDiagnosticSnapshotSave(bool success, const QString &detail);
     bool preview() const;
     QString sourceText() const;
     QString seatText() const;
@@ -120,6 +126,7 @@ public:
     Q_INVOKABLE void stop();
     Q_INVOKABLE void requestBusinessAction();
     Q_INVOKABLE void saveInfantryConfig(int robotId);
+    Q_INVOKABLE void saveDiagnosticSnapshot();
 
 signals:
     void stateChanged();
@@ -135,12 +142,16 @@ signals:
     void actionFeedbackChanged();
     void personalConfigPathChanged();
     void configFeedbackChanged();
+    void snapshotSaveChanged();
 
 private:
     application::ClientSession &session_;
     std::optional<domain::RunMode> mode_;
     QString startupError_;
     QString logPath_;
+    std::function<void()> saveSnapshot_;
+    bool snapshotSaving_ = false;
+    QString snapshotSaveFeedback_;
     QString personalConfigPath_;
     std::function<QString(int)> saveConfig_;
     QString configFeedback_;

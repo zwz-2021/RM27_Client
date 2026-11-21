@@ -25,6 +25,20 @@ $closed = Invoke-ProductWindow $ConfigFile $WindowTitle $Configuration $director
                                    'videoPresentationRateLabel', 'videoPreviewStatus')) {
                     if ($controls.ContainsKey($id)) { $view[$id] = $controls[$id].Current.Name }
                 }
+                if ($controls.ContainsKey('snapshotSaveFeedback')) {
+                    $feedback = $controls['snapshotSaveFeedback']
+                    $pattern = $null
+                    if ($feedback.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$pattern)) {
+                        $view['snapshotSaveFeedback'] = $pattern.Current.Value
+                    } elseif ($feedback.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$pattern)) {
+                        $view['snapshotSaveFeedback'] = $pattern.DocumentRange.GetText(-1)
+                    } else {
+                        $view['snapshotSaveFeedback'] = $feedback.Current.Name
+                    }
+                }
+                if ($controls.ContainsKey('saveDiagnosticSnapshotButton')) {
+                    $view['snapshotSaveEnabled'] = $controls['saveDiagnosticSnapshotButton'].Current.IsEnabled
+                }
                 [Console]::WriteLine((ConvertTo-Json $view -Compress))
             }
             { $_ -in @('capturePreview', 'captureDiagnostics', 'captureDecodeRate') } {
@@ -39,7 +53,7 @@ $closed = Invoke-ProductWindow $ConfigFile $WindowTitle $Configuration $director
                 }
                 [Console]::WriteLine((ConvertTo-Json $capture -Depth 4 -Compress))
             }
-            { $_ -in @('overviewTab', 'diagnosticsTab', 'stopButton', 'startButton', 'saveReceiverButton') } {
+            { $_ -in @('overviewTab', 'diagnosticsTab', 'stopButton', 'startButton', 'saveReceiverButton', 'saveDiagnosticSnapshotButton') } {
                 Invoke-Control $action
                 [Console]::WriteLine('{"invoked":true}')
             }

@@ -5,6 +5,32 @@
 #include <utility>
 
 namespace rm27::presentation {
+
+void ClientViewModel::setDiagnosticSnapshotSaver(std::function<void()> save)
+{
+    saveSnapshot_ = std::move(save);
+}
+
+void ClientViewModel::saveDiagnosticSnapshot()
+{
+    if (snapshotSaving_) return;
+    if (!saveSnapshot_) {
+        finishDiagnosticSnapshotSave(false, QStringLiteral("诊断保存入口不可用。"));
+        return;
+    }
+    snapshotSaving_ = true;
+    snapshotSaveFeedback_ = QStringLiteral("正在保存本次采样……");
+    emit snapshotSaveChanged();
+    saveSnapshot_();
+}
+
+void ClientViewModel::finishDiagnosticSnapshotSave(bool success, const QString &detail)
+{
+    snapshotSaving_ = false;
+    snapshotSaveFeedback_ = (success ? QStringLiteral("已保存诊断快照：\n") : QStringLiteral("保存失败：\n")) + detail;
+    emit snapshotSaveChanged();
+}
+
 namespace {
 
 const QString missing = QStringLiteral("—");

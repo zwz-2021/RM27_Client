@@ -138,6 +138,45 @@ void SimulationVideoDecode::refreshRates()
     emit presentationRateChanged(QStringLiteral("最近 1 秒控件交付：%1 帧/秒").arg(presentationRate_.countAt(nowMs)));
 }
 
+QJsonObject SimulationVideoDecode::diagnosticSnapshot()
+{
+    const bool active = refresh_.isActive();
+    // Decoder status and GUI state are sampled sequentially, not a hardware timestamp.
+    const auto status = decoder_.status();
+    quint64 decodedRate;
+    qint64 nowMs;
+    {
+        QMutexLocker lock(&frameMutex_);
+        nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count();
+        decodedRate = decodeRate_.countAt(nowMs);
+    }
+    const bool hasFrame = currentFrame_.isValid();
+    const auto now = Clock::now();
+    const bool expired = hasFrame && (stale_ || !status.error.isEmpty()
+        || status.phase == video::HevcStreamPhase::WaitingForPicture
+        || now - lastInput_ >= FrameTimeout || now - lastOutput_ >= FrameTimeout);
+    QString state = QStringLiteral("stopped");
+    if (active) {
+        if (!status.error.isEmpty()) state = QStringLiteral("error");
+        else if (expired) state = QStringLiteral("stale");
+        else state = hasFrame ? QStringLiteral("playing") : QStringLiteral("waiting");
+    }
+    QString phase = QStringLiteral("idle");
+    if (status.phase == video::HevcStreamPhase::WaitingForPicture) phase = QStringLiteral("waiting_for_picture");
+    if (status.phase == video::HevcStreamPhase::Decoding) phase = QStringLiteral("decoding");
+    return {{"state", state}, {"phase", phase},
+        {"decoded_frames_total", QString::number(status.decodedFrames)},
+        {"decoded_frames_last_second", active ? QJsonValue(QString::number(decodedRate)) : QJsonValue(QJsonValue::Null)},
+        {"presented_frames_last_second", active ? QJsonValue(QString::number(presentationRate_.countAt(nowMs))) : QJsonValue(QJsonValue::Null)},
+        {"pending_frames", status.pendingFrames}, {"pending_bytes", status.pendingBytes},
+        {"dropped_frames_total", QString::number(status.droppedFrames)},
+        {"other_source_frames_total", QString::number(otherSourceFrames_)},
+        {"width", status.width > 0 ? QJsonValue(status.width) : QJsonValue(QJsonValue::Null)},
+        {"height", status.height > 0 ? QJsonValue(status.height) : QJsonValue(QJsonValue::Null)},
+        {"has_frame", hasFrame}, {"frame_stale", expired}, {"sink_attached", bool(sink_)},
+        {"error_present", !status.error.isEmpty()}, {"diagnostic_present", !status.diagnostic.isEmpty()}};
+}
+
 void SimulationVideoDecode::deliverCurrentFrame()
 {
     if (!sink_)

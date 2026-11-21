@@ -91,6 +91,10 @@ private slots:
         const auto presentationStopped = QStringLiteral("最近 1 秒控件交付：—");
         QCOMPARE(rate, zero);
         QCOMPARE(presentationRate, presentationZero);
+        const auto waitingSnapshot = decode.diagnosticSnapshot();
+        QCOMPARE(waitingSnapshot["state"].toString(), QStringLiteral("waiting"));
+        QCOMPARE(waitingSnapshot["decoded_frames_last_second"].toString(), QStringLiteral("0"));
+        QVERIFY(waitingSnapshot["width"].isNull());
 
         bool firstOutput = false;
         bool drained = false;
@@ -99,6 +103,7 @@ private slots:
         QString rateBeforeReopen;
         QString historyBeforeReopen;
         QString presentationBeforeRelease;
+        QJsonObject snapshotBeforeRelease;
         int displayedBeforeRelease = -1;
         HoldFirstDelivery gate;
         gate.beforeDispatch = [&] {
@@ -115,6 +120,7 @@ private slots:
             historyBeforeReopen = rateChanges.join(';');
             displayedBeforeRelease = displayed;
             presentationBeforeRelease = presentationRate;
+            snapshotBeforeRelease = decode.diagnosticSnapshot();
             if (restart) {
                 receiver.stop();
                 stoppedRateCleared = rate == stopped && presentationRate == presentationStopped;
@@ -132,6 +138,10 @@ private slots:
         QCOMPARE(rateBeforeReopen, two);
         QCOMPARE(displayedBeforeRelease, 0);
         QCOMPARE(presentationBeforeRelease, presentationZero);
+        QCOMPARE(snapshotBeforeRelease["decoded_frames_total"].toString(), QStringLiteral("3"));
+        QCOMPARE(snapshotBeforeRelease["decoded_frames_last_second"].toString(), QStringLiteral("2"));
+        QCOMPARE(snapshotBeforeRelease["presented_frames_last_second"].toString(), QStringLiteral("0"));
+        QVERIFY(!snapshotBeforeRelease["has_frame"].toBool());
         QCOMPARE(gate.wakeups, 1);
         if (restart) {
             QVERIFY(reopened);
@@ -165,9 +175,20 @@ private slots:
         }
         QTRY_COMPARE_WITH_TIMEOUT(rate, zero, 2500);
         QTRY_COMPARE_WITH_TIMEOUT(presentationRate, presentationZero, 2500);
+        const auto silentSnapshot = decode.diagnosticSnapshot();
+        QCOMPARE(silentSnapshot["state"].toString(), QStringLiteral("stale"));
+        QCOMPARE(silentSnapshot["decoded_frames_last_second"].toString(), QStringLiteral("0"));
+        QCOMPARE(silentSnapshot["presented_frames_last_second"].toString(), QStringLiteral("0"));
+        QVERIFY(silentSnapshot["frame_stale"].toBool());
         receiver.stop();
         QCOMPARE(rate, stopped);
         QCOMPARE(presentationRate, presentationStopped);
+        const auto stoppedSnapshot = decode.diagnosticSnapshot();
+        QCOMPARE(stoppedSnapshot["state"].toString(), QStringLiteral("stopped"));
+        QCOMPARE(stoppedSnapshot["decoded_frames_total"].toString(), QStringLiteral("0"));
+        QVERIFY(stoppedSnapshot["decoded_frames_last_second"].isNull());
+        QVERIFY(stoppedSnapshot["presented_frames_last_second"].isNull());
+        QVERIFY(!stoppedSnapshot["has_frame"].toBool());
         receiver.stop();
         QCOMPARE(rate, stopped);
         QCOMPARE(presentationRate, presentationStopped);

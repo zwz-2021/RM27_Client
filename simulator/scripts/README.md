@@ -211,6 +211,49 @@ $clip = 'simulator/resources/videos/demo-1080p60.hevc'
 .\simulator\.venv\Scripts\python.exe tests/check_simulated_video_pacing.py --configuration Debug
 ```
 
+### 手测单次链路诊断快照
+
+本轮增加“运行信息 → 保存诊断快照”。在仓库根目录先检查服务，已启动时直接复用；未启动时打开 Docker Desktop，再执行启动命令：
+
+```powershell
+.\simulator\scripts\check.ps1 -Runtime
+# 仅在模拟器未运行时执行：
+.\simulator\scripts\start.ps1 -CurrentRobotId 3
+```
+
+浏览器打开 `http://127.0.0.1:8000`，选择红 3，先停止推流。另开 PowerShell 启动客户端；本机已构建 Debug，可直接使用 `-SkipBuild`，其他机器先运行构建脚本：
+
+```powershell
+.\scripts\run.ps1 -Configuration Debug -SkipBuild -ConfigFile configs/infantry.example.json -LogDirectory logs/manual-snapshot
+```
+
+每次保存后等待“已保存诊断快照”，文件为 `logs/manual-snapshot/link-snapshot.json`。同一路径只保留最后一次成功保存的状态；如需比较，先自行复制上一份。点击保存期间按钮暂不可用，完成后可继续操作。
+
+| 场景 | 手动操作 | 应看到的结果 |
+| --- | --- | --- |
+| 无视频输入 | 确认“五类订阅就绪”，进入运行信息保存 | `udp.state` 为 `bound`，四项 `*_last_second` 为字符串 `"0"`，包龄/包头为 `null`，解码为 `waiting`。MQTT 订阅就绪与各消息实际收到分别记录。 |
+| 播放 | 网页选 `testdemo.mp4` 或本机录屏，切换后开始推流；确认客户端有画面，再保存 | 有效包、完整帧、解码输出和控件交付有计数；`decode.state` 为 `playing`，有像素尺寸。瞬时值可能不同，不要求恰好为 60。 |
+| 视频静默、MQTT仍活跃 | 网页停止推流，等待至少 3 秒；改红 3 血量并确认客户端更新，再保存 | 四项速率归零，累计数保留，包龄增加，`decode.state` 为 `stale`、`frame_stale` 为 `true`；MQTT 仍为 `connected`，动态状态 `received=true`、`stale=false`。 |
+| 停止与重开 | 工作台停止，保存；随后启动数据源、保持网页停流，再保存 | 停止时 MQTT 为 `disconnected`、五类消息 `received=false`；UDP/解码为 `stopped`，速率为 `null`。重开后从零等待新视频，不带入旧画面或旧累计数。 |
+| 写入失败与恢复 | 使用下面的只读锁暂时锁住快照，在客户端再次保存；回到终端释放锁后重试 | 第一次明确显示“保存失败”，旧 JSON 保持完整，客户端仍能接收；释放锁后保存成功。 |
+
+失败场景只锁定本轮生成的文件，不改目录权限。在另一个 PowerShell 中执行；保持它等待时回到客户端点击保存，然后回终端按回车释放：
+
+```powershell
+$snapshotPath = Join-Path (Get-Location) 'logs/manual-snapshot/link-snapshot.json'
+$snapshotLock = [IO.File]::Open($snapshotPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+try { Read-Host '现在到客户端保存一次，看到失败后回此处按回车释放' }
+finally { $snapshotLock.Dispose() }
+```
+
+JSON 的 `schema_version` 为 1，含带时区的本机采样时间与 UTC 时间；`semantics` 说明单位、最近 1000 ms 窗口、十进制字符串计数及 `null` 含义。各模块顺序采样，不是跨链路同一时刻的硬件测量。它不包含画面、原始报文、地址、机器人 ID、配置路径或自由错误文本；界面仍可查看详细错误。单文件最多 32 KiB，不是录包或回放文件。官方源/授权和机器人现场表现仍待实测。
+
+自动复测从正常 Qt 启动入口使用独立端口，关闭自己的窗口及临时服务：
+
+```powershell
+.\simulator\.venv\Scripts\python.exe tests/check_link_snapshot.py --configuration Debug
+```
+
 ## 结束测试
 
 网页点“停止推流”，关闭自己打开的 Qt 窗口。若模拟器由你在本轮启动，再运行 `.\simulator\scripts\stop.ps1`。复用原来已在运行的服务时可以让它继续运行。

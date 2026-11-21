@@ -119,6 +119,17 @@ void UdpVideoReceiver::stop()
     emit statusChanged();
 }
 
+video::UdpVideoStatus UdpVideoReceiver::diagnosticStatus()
+{
+    auto snapshot = status_;
+    if (snapshot.state == UdpVideoState::Bound) {
+        const auto nowMs = sessionClock_.elapsed();
+        snapshot.validPacketsLastSecond = packetRate_.countAt(nowMs);
+        snapshot.completedFramesLastSecond = frameRate_.countAt(nowMs);
+    }
+    return snapshot;
+}
+
 void UdpVideoReceiver::scheduleExpiry()
 {
     const auto deadline = assembler_.nextDeadlineMs();

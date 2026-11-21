@@ -16,6 +16,36 @@ ScrollView {
 
     Frame {
       Layout.fillWidth: true
+      padding: 20
+      ColumnLayout {
+        anchors.fill: parent
+        spacing: 8
+        Label { text: "链路诊断快照"; font.bold: true }
+        Label {
+          Layout.fillWidth: true
+          text: "保存当前 MQTT 和视频链路状态；每次替换同一个 JSON 文件。"
+          wrapMode: Text.Wrap
+        }
+        Button {
+          objectName: "saveDiagnosticSnapshotButton"
+          text: root.viewModel.snapshotSaving ? "正在保存……" : "保存诊断快照"
+          enabled: !root.viewModel.snapshotSaving
+          onClicked: root.viewModel.saveDiagnosticSnapshot()
+        }
+        TextArea {
+          objectName: "snapshotSaveFeedback"
+          Layout.fillWidth: true
+          visible: text.length > 0
+          text: root.viewModel.snapshotSaveFeedback
+          readOnly: true
+          selectByMouse: true
+          wrapMode: TextEdit.WrapAnywhere
+        }
+      }
+    }
+
+    Frame {
+      Layout.fillWidth: true
       visible: root.viewModel.infantrySeat
       padding: 20
       ColumnLayout {

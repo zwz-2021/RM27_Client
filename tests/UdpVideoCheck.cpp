@@ -93,6 +93,13 @@ void UdpVideoCheck::wireSamples()
     QCOMPARE(s.lastHeader->frameBytes, 1U);
     QCOMPARE(s.lastPacketBytes, 9);
     QTRY_VERIFY(!changes.isEmpty());
+    // Block event dispatch past the window boundary: a save must sample now,
+    // not reuse the last 100ms UI notification's non-zero rates.
+    QTest::qSleep(1050);
+    const auto snapshot = receiver.diagnosticStatus();
+    QCOMPARE(snapshot.validPackets, 2ULL);
+    QCOMPARE(snapshot.validPacketsLastSecond, 0ULL);
+    QVERIFY(snapshot.lastValidPacketAt.elapsed() >= 1000);
 }
 
 void UdpVideoCheck::exclusiveBindAndRestart()

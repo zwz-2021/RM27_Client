@@ -1,5 +1,6 @@
 #include "ClientApplication.h"
 #include "SimulationVideoDecode.h"
+#include "LinkDiagnostics.h"
 
 #include "application/ClientSession.h"
 #include "config/AppConfig.h"
@@ -15,6 +16,8 @@
 #include <QDebug>
 #include <QDir>
 #include <QFileInfo>
+#include <QFutureWatcher>
+#include <QtConcurrentRun>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
@@ -185,6 +188,22 @@ int ClientApplication::run(QGuiApplication &app)
             });
     }
 
+    QFutureWatcher<SnapshotSaveResult> snapshotWriter;
+    QObject::connect(&snapshotWriter, &QFutureWatcher<SnapshotSaveResult>::finished, &viewModel, [&] {
+        const auto saved = snapshotWriter.result();
+        viewModel.finishDiagnosticSnapshotSave(saved.success, saved.success ? saved.path : saved.error);
+    });
+    viewModel.setDiagnosticSnapshotSaver([&] {
+        // Sample live objects on their owner thread; the worker only owns JSON and a path.
+        const auto snapshot = captureLinkDiagnostics(session,
+            result.config ? std::optional<domain::RunMode>(settings.mode) : std::nullopt,
+            udp.diagnosticStatus(), simulationDecode ? simulationDecode->diagnosticSnapshot() : QJsonObject{});
+        const auto path = QFileInfo(logPath).absoluteDir().filePath(QStringLiteral("link-snapshot.json"));
+        snapshotWriter.setFuture(QtConcurrent::run([path, snapshot] {
+            return saveLinkDiagnostics(path, snapshot);
+        }));
+    });
+
     qmlRegisterUncreatableType<presentation::ClientViewModel>(
         "RM27.Client", 1, 0, "ClientViewModel", QStringLiteral("由应用组合根创建"));
     QQmlApplicationEngine engine;
@@ -213,6 +232,7 @@ int ClientApplication::run(QGuiApplication &app)
     }
     const int exitCode = app.exec();
     session.stop();
+    snapshotWriter.waitForFinished();
     if (logOpen && !logger.write(QStringLiteral("info"), QStringLiteral("client.stop"))) {
         qWarning().noquote() << logger.errorString();
     }

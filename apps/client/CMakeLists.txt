@@ -4,11 +4,14 @@ qt_add_executable(RM27_Client WIN32
     ClientApplication.h
     SimulationVideoDecode.cpp
     SimulationVideoDecode.h
+    LinkDiagnostics.cpp
+    LinkDiagnostics.h
     client.qrc
 )
+find_package(Qt6 REQUIRED COMPONENTS Concurrent)
 target_link_libraries(RM27_Client PRIVATE
     rm27_config rm27_diagnostics rm27_transport rm27_presentation rm27_protocol
-    Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Multimedia
+    Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Multimedia Qt6::Concurrent
 )
 target_compile_definitions(RM27_Client PRIVATE
     RM27_VERSION="${PROJECT_VERSION}"
@@ -23,6 +26,13 @@ if(BUILD_TESTING)
     target_link_libraries(RM27_SessionCheck PRIVATE rm27_application rm27_config)
     set_target_properties(RM27_SessionCheck PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
     add_test(NAME basic_session COMMAND RM27_SessionCheck)
+
+    add_executable(RM27_LinkDiagnosticsCheck ../../tests/LinkDiagnosticsCheck.cpp
+        LinkDiagnostics.cpp LinkDiagnostics.h)
+    target_include_directories(RM27_LinkDiagnosticsCheck PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(RM27_LinkDiagnosticsCheck PRIVATE rm27_presentation)
+    set_target_properties(RM27_LinkDiagnosticsCheck PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+    add_test(NAME link_diagnostics COMMAND RM27_LinkDiagnosticsCheck)
 
     qt_add_executable(RM27_MqttCheck ../../tests/MqttReceiveCheck.cpp client.qrc)
     target_link_libraries(RM27_MqttCheck PRIVATE rm27_transport rm27_presentation rm27_config
