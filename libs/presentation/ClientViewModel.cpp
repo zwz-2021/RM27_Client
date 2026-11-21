@@ -127,6 +127,13 @@ void ClientViewModel::setVideoDecodeText(const QString &text)
     emit videoDecodeChanged();
 }
 
+void ClientViewModel::setVideoDecodeRateText(const QString &text)
+{
+    if (text == videoDecodeRateText_) return;
+    videoDecodeRateText_ = text;
+    emit videoDecodeRateChanged();
+}
+
 QString ClientViewModel::udpBindingText() const
 {
     const QString endpoint = QStringLiteral("%1:%2").arg(udpStatus_.bindAddress).arg(udpStatus_.bindPort);

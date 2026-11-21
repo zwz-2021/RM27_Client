@@ -129,6 +129,8 @@ int ClientApplication::run(QGuiApplication &app)
         simulationDecode = std::make_unique<SimulationVideoDecode>(udp, parser.isSet(QStringLiteral("trace-simulated-video")));
         QObject::connect(simulationDecode.get(), &SimulationVideoDecode::statusChanged,
                          &viewModel, &presentation::ClientViewModel::setVideoDecodeText);
+        QObject::connect(simulationDecode.get(), &SimulationVideoDecode::decodeRateChanged,
+                         &viewModel, &presentation::ClientViewModel::setVideoDecodeRateText);
         QObject::connect(simulationDecode.get(), &SimulationVideoDecode::logRecord, &viewModel, logVideo);
     }
     QObject::connect(&udp, &transport::UdpVideoReceiver::statusChanged, &viewModel, [&] {

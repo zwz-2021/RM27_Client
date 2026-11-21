@@ -100,6 +100,7 @@ async def check_assembly(window, target):
         burst = await window.observe("four valid packets and two short packets complete one frame",
                                      udpPacketRateLabel="^最近 1 秒有效 UDP 收包：4 包/秒$",
                                      udpFrameRateLabel="^最近 1 秒完整组帧：1 帧/秒$",
+                                     videoDecodeRateLabel="^最近 1 秒解码输出：0 帧/秒$",
                                      udpCountersLabel=r"^有效包 4 · 丢弃 2\b",
                                      udpAssemblyLabel=r"完整帧 1\b.*重复分片 1\b",
                                      udpLastFrameLabel=rf"帧号 65535 · 长度 6 字节 · {source}")
@@ -129,6 +130,7 @@ async def check_assembly(window, target):
         incomplete = await window.observe("only one fragment of a new frame arrives",
                                           udpPacketRateLabel="^最近 1 秒有效 UDP 收包：1 包/秒$",
                                           udpFrameRateLabel="^最近 1 秒完整组帧：0 帧/秒$",
+                                          videoDecodeRateLabel="^最近 1 秒解码输出：0 帧/秒$",
                                           udpAssemblyLabel=r"完整帧 2\b", udpLastFrameLabel=last)
         await window.observe("incomplete frame expires without any further UDP traffic",
                              udpFrameRateLabel="^最近 1 秒完整组帧：0 帧/秒$",
@@ -189,6 +191,7 @@ async def verify(configuration, evidence):
             await window.action("diagnosticsTab")
             await window.observe("port conflict reported", udpBindingLabel=rf"绑定失败.*127\.0\.0\.1:{port}\b",
                                  udpFrameRateLabel="^最近 1 秒完整组帧：—$",
+                                 videoDecodeRateLabel="^最近 1 秒解码输出：—$",
                                  udpPacketRateLabel="^最近 1 秒有效 UDP 收包：—$")
             await window.action("overviewTab")
             await window.action("stopButton")
@@ -200,6 +203,7 @@ async def verify(configuration, evidence):
             await window.action("diagnosticsTab")
             await window.observe("UDP bound with fresh counters", udpBindingLabel=rf"已绑定 127\.0\.0\.1:{port}\b",
                                  udpFrameRateLabel="^最近 1 秒完整组帧：0 帧/秒$",
+                                 videoDecodeRateLabel="^最近 1 秒解码输出：0 帧/秒$",
                                  udpCountersLabel=r"^有效包 0 · 丢弃 0\b", udpHeaderLabel="尚未收到有效包",
                                  udpPacketAgeLabel="^等待本会话首个有效 UDP 包$",
                                  udpPacketRateLabel="^最近 1 秒有效 UDP 收包：0 包/秒$",
@@ -245,6 +249,7 @@ async def verify(configuration, evidence):
                 await window.action("diagnosticsTab")
                 await window.observe("UDP released and last header cleared", udpBindingLabel="已停止",
                                      udpFrameRateLabel="^最近 1 秒完整组帧：—$",
+                                     videoDecodeRateLabel="^最近 1 秒解码输出：—$",
                                      udpHeaderLabel="尚未收到有效包", udpCountersLabel=r"^有效包 0 · 丢弃 0\b",
                                      udpPacketAgeLabel="^—$",
                                      udpPacketRateLabel="^最近 1 秒有效 UDP 收包：—$",
@@ -255,6 +260,7 @@ async def verify(configuration, evidence):
             await window.action("diagnosticsTab")
             await window.observe("new session without old data", udpBindingLabel=rf"已绑定 127\.0\.0\.1:{port}\b",
                                  udpFrameRateLabel="^最近 1 秒完整组帧：0 帧/秒$",
+                                 videoDecodeRateLabel="^最近 1 秒解码输出：0 帧/秒$",
                                  udpCountersLabel=r"^有效包 0 · 丢弃 0\b", udpHeaderLabel="尚未收到有效包",
                                  udpPacketAgeLabel="^等待本会话首个有效 UDP 包$",
                                  udpPacketRateLabel="^最近 1 秒有效 UDP 收包：0 包/秒$",

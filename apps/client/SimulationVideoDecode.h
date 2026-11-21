@@ -1,6 +1,7 @@
 #pragma once
 
 #include "video/HevcStreamDecoder.h"
+#include "transport/OneSecondCountWindow.h"
 #include <QObject>
 #include <QPointer>
 #include <QStringList>
@@ -31,6 +32,7 @@ signals:
     void videoSinkChanged();
     void displayStateChanged();
     void statusChanged(const QString &text);
+    void decodeRateChanged(const QString &text);
     void logRecord(const QString &level, const QString &event, const QString &detail);
 
 private:
@@ -42,6 +44,7 @@ private:
     };
     void queueFrame(video::DecodedVideoFrame frame);
     void presentLatest();
+    void refreshDecodeRate();
     void updateDisplay(const video::HevcStreamStatus &state, bool newFrame);
     void setDisplayState(const QString &text, bool stale = false);
     QString statusText(const video::HevcStreamStatus &state) const;
@@ -61,6 +64,7 @@ private:
     bool stale_ = false;
     // One replaceable worker output and at most one outstanding GUI wakeup.
     QMutex frameMutex_;
+    transport::OneSecondCountWindow decodeRate_;
     std::optional<video::DecodedVideoFrame> pendingFrame_;
     Clock::time_point pendingSince_;
     bool deliveryScheduled_ = false;

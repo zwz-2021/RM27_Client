@@ -48,6 +48,7 @@ SimulationVideoDecode::SimulationVideoDecode(transport::UdpVideoReceiver &receiv
         const auto state = decoder_.status();
         updateDisplay(state, false);
         emit statusChanged(statusText(state));
+        refreshDecodeRate();
     });
     connect(&receiver, &transport::UdpVideoReceiver::statusChanged, this, [this, &receiver] {
         if (receiver.status().state != video::UdpVideoState::Bound) {
@@ -71,6 +72,7 @@ SimulationVideoDecode::SimulationVideoDecode(transport::UdpVideoReceiver &receiv
         });
         setDisplayState(QStringLiteral("等待模拟画面"));
         refresh_.start();
+        refreshDecodeRate();
         emit statusChanged(statusText(decoder_.status()));
     });
     connect(&receiver, &transport::UdpVideoReceiver::frameAssembled, this,
@@ -112,12 +114,27 @@ void SimulationVideoDecode::setVideoSink(QVideoSink *sink)
 void SimulationVideoDecode::queueFrame(video::DecodedVideoFrame frame)
 {
     QMutexLocker lock(&frameMutex_);
+    // Count every worker output before the GUI's latest-frame slot coalesces it.
+    // Idle drain also produces real pixels; timestamp those at delivery, not input.
+    const auto now = Clock::now();
+    decodeRate_.record(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count());
     pendingFrame_ = std::move(frame);
-    pendingSince_ = Clock::now();
+    pendingSince_ = now;
     if (!deliveryScheduled_) {
         deliveryScheduled_ = true;
         QMetaObject::invokeMethod(this, &SimulationVideoDecode::presentLatest, Qt::QueuedConnection);
     }
+}
+
+void SimulationVideoDecode::refreshDecodeRate()
+{
+    quint64 count;
+    {
+        QMutexLocker lock(&frameMutex_);
+        const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count();
+        count = decodeRate_.countAt(nowMs);
+    }
+    emit decodeRateChanged(QStringLiteral("最近 1 秒解码输出：%1 帧/秒").arg(count));
 }
 
 void SimulationVideoDecode::presentLatest()
@@ -212,6 +229,7 @@ void SimulationVideoDecode::stop()
         {
             QMutexLocker lock(&frameMutex_);
             pendingFrame_.reset();
+            decodeRate_.clear();
         }
         currentFrame_ = {};
         if (sink_)
@@ -236,6 +254,7 @@ void SimulationVideoDecode::stop()
         otherSourceFrames_ = 0;
     }
     setDisplayState(QStringLiteral("已停止"));
+    emit decodeRateChanged(QStringLiteral("最近 1 秒解码输出：—"));
     emit statusChanged(QStringLiteral("本机模拟解码 · 已停止 · 已解码 0 帧"));
 }
 

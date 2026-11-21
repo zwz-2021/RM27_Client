@@ -54,6 +54,13 @@ ScrollView {
             Layout.fillWidth: true
             wrapMode: Text.Wrap
           }
+          Label {
+            objectName: "videoDecodeRateLabel"
+            text: root.viewModel.videoDecodeRateText
+            visible: text.length > 0
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+          }
         }
         Label {
           objectName: "udpPacketAgeLabel"

@@ -21,17 +21,18 @@ $closed = Invoke-ProductWindow $ConfigFile $WindowTitle $Configuration $director
                 $controls = Get-Controls
                 foreach ($id in @('connectionValue', 'seatLabel', 'identityValue', 'healthValue',
                                    'udpBindingLabel', 'udpCountersLabel', 'udpHeaderLabel', 'udpPacketAgeLabel', 'udpPacketRateLabel',
-                                   'udpFrameRateLabel', 'udpAssemblyLabel', 'udpLastFrameLabel', 'videoDecodeLabel', 'videoPreviewStatus')) {
+                                   'udpFrameRateLabel', 'udpAssemblyLabel', 'udpLastFrameLabel', 'videoDecodeLabel', 'videoDecodeRateLabel', 'videoPreviewStatus')) {
                     if ($controls.ContainsKey($id)) { $view[$id] = $controls[$id].Current.Name }
                 }
                 [Console]::WriteLine((ConvertTo-Json $view -Compress))
             }
-            { $_ -in @('capturePreview', 'captureDiagnostics') } {
+            { $_ -in @('capturePreview', 'captureDiagnostics', 'captureDecodeRate') } {
                 if (-not (Get-Command Save-PreviewCapture -ErrorAction SilentlyContinue)) {
                     . (Join-Path $PSScriptRoot 'capture_qt_preview.ps1')
                 }
-                if ($action -eq 'captureDiagnostics') {
-                    $capture = Save-PreviewCapture $client.MainWindowHandle (Join-Path $directory 'udp-silence.png') -WholeWindow
+                if ($action -ne 'capturePreview') {
+                    $captureName = if ($action -eq 'captureDecodeRate') { 'decode-rate.png' } else { 'udp-silence.png' }
+                    $capture = Save-PreviewCapture $client.MainWindowHandle (Join-Path $directory $captureName) -WholeWindow
                 } else {
                     $capture = Save-PreviewCapture $client.MainWindowHandle (Join-Path $directory 'capture.png')
                 }
