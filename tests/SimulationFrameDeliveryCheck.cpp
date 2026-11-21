@@ -70,7 +70,7 @@ private slots:
             if (frame.isValid())
                 ++displayed;
         });
-        QString status, rate;
+        QString status, rate, presentationRate;
         QStringList rateChanges;
         connect(&decode, &SimulationVideoDecode::statusChanged, this, [&](const QString &text) { status = text; });
         connect(&decode, &SimulationVideoDecode::decodeRateChanged, this, [&](const QString &text) {
@@ -78,13 +78,19 @@ private slots:
             if (rateChanges.isEmpty() || rateChanges.back() != text)
                 rateChanges.append(text);
         });
+        connect(&decode, &SimulationVideoDecode::presentationRateChanged, this,
+                [&](const QString &text) { presentationRate = text; });
         const auto loopback = QStringLiteral("127.0.0.1");
         QVERIFY(receiver.start(loopback, 0, true));
         const auto zero = QStringLiteral("最近 1 秒解码输出：0 帧/秒");
         const auto one = QStringLiteral("最近 1 秒解码输出：1 帧/秒");
         const auto two = QStringLiteral("最近 1 秒解码输出：2 帧/秒");
         const auto stopped = QStringLiteral("最近 1 秒解码输出：—");
+        const auto presentationZero = QStringLiteral("最近 1 秒控件交付：0 帧/秒");
+        const auto presentationOne = QStringLiteral("最近 1 秒控件交付：1 帧/秒");
+        const auto presentationStopped = QStringLiteral("最近 1 秒控件交付：—");
         QCOMPARE(rate, zero);
+        QCOMPARE(presentationRate, presentationZero);
 
         bool firstOutput = false;
         bool drained = false;
@@ -92,6 +98,7 @@ private slots:
         bool stoppedRateCleared = false;
         QString rateBeforeReopen;
         QString historyBeforeReopen;
+        QString presentationBeforeRelease;
         int displayedBeforeRelease = -1;
         HoldFirstDelivery gate;
         gate.beforeDispatch = [&] {
@@ -107,9 +114,10 @@ private slots:
             rateBeforeReopen = rate;
             historyBeforeReopen = rateChanges.join(';');
             displayedBeforeRelease = displayed;
+            presentationBeforeRelease = presentationRate;
             if (restart) {
                 receiver.stop();
-                stoppedRateCleared = rate == stopped;
+                stoppedRateCleared = rate == stopped && presentationRate == presentationStopped;
                 rateChanges.clear();
                 reopened = receiver.start(loopback, 0, true);
             }
@@ -123,6 +131,7 @@ private slots:
         QVERIFY2(drained, qPrintable(evidence));
         QCOMPARE(rateBeforeReopen, two);
         QCOMPARE(displayedBeforeRelease, 0);
+        QCOMPARE(presentationBeforeRelease, presentationZero);
         QCOMPARE(gate.wakeups, 1);
         if (restart) {
             QVERIFY(reopened);
@@ -131,10 +140,12 @@ private slots:
             QVERIFY(!sink.videoFrame().isValid());
             QCOMPARE(decode.displayStatus(), QStringLiteral("等待模拟画面"));
             QCOMPARE(rate, zero);
+            QCOMPARE(presentationRate, presentationZero);
             // Dispatching the old GUI wakeup cannot count a new decoder output.
             QTest::qWait(1100);
             for (const auto &text : rateChanges)
                 QCOMPARE(text, zero);
+            QCOMPARE(presentationRate, presentationZero);
             sendThreePictures(receiver);
             QVERIFY2(QTest::qWaitFor([&] {
                 return status.contains(QStringLiteral("已解码 1 帧")) && rate == one;
@@ -145,6 +156,7 @@ private slots:
         } else {
             QCOMPARE(displayed, 1);
             QCOMPARE(rate, two); // Both drained outputs count even though the sink receives only the final picture.
+            QTRY_COMPARE_WITH_TIMEOUT(presentationRate, presentationOne, 500);
             auto frame = sink.videoFrame();
             QCOMPARE(frame.size(), QSize(32, 32));
             QVERIFY(frame.map(QVideoFrame::ReadOnly));
@@ -152,10 +164,142 @@ private slots:
             frame.unmap();
         }
         QTRY_COMPARE_WITH_TIMEOUT(rate, zero, 2500);
+        QTRY_COMPARE_WITH_TIMEOUT(presentationRate, presentationZero, 2500);
         receiver.stop();
         QCOMPARE(rate, stopped);
+        QCOMPARE(presentationRate, presentationStopped);
         receiver.stop();
         QCOMPARE(rate, stopped);
+        QCOMPARE(presentationRate, presentationStopped);
+    }
+
+    void firstSinkAndRemount()
+    {
+        UdpVideoReceiver receiver;
+        SimulationVideoDecode decode(receiver, false);
+        QString status, decodeRate, presentationRate;
+        connect(&decode, &SimulationVideoDecode::statusChanged, this, [&](const QString &text) { status = text; });
+        connect(&decode, &SimulationVideoDecode::decodeRateChanged, this, [&](const QString &text) { decodeRate = text; });
+        connect(&decode, &SimulationVideoDecode::presentationRateChanged, this,
+                [&](const QString &text) { presentationRate = text; });
+        const auto zero = QStringLiteral("最近 1 秒控件交付：0 帧/秒");
+        const auto one = QStringLiteral("最近 1 秒控件交付：1 帧/秒");
+        const auto stopped = QStringLiteral("最近 1 秒控件交付：—");
+        QVERIFY(receiver.start(QStringLiteral("127.0.0.1"), 0, true));
+        QCOMPARE(presentationRate, zero);
+
+        // All three pictures decode while no video control exists. They must
+        // not count as presentation, even after their decode window expires.
+        sendThreePictures(receiver);
+        QTRY_VERIFY_WITH_TIMEOUT(status.contains(QStringLiteral("等待输入 · 已解码 3 帧")), 5000);
+        QTRY_COMPARE_WITH_TIMEOUT(decodeRate, QStringLiteral("最近 1 秒解码输出：0 帧/秒"), 2500);
+        QCOMPARE(presentationRate, zero);
+
+        auto sink = std::make_unique<QVideoSink>();
+        decode.setVideoSink(sink.get());
+        QVERIFY(sink->videoFrame().isValid());
+        QTRY_COMPARE_WITH_TIMEOUT(presentationRate, one, 500);
+        QCOMPARE(decodeRate, QStringLiteral("最近 1 秒解码输出：0 帧/秒"));
+        const auto picture = sink->videoFrame();
+        decode.setVideoSink(nullptr);
+        QVERIFY(!sink->videoFrame().isValid());
+        decode.setVideoSink(sink.get());
+        QCOMPARE(sink->videoFrame(), picture);
+        decode.setVideoSink(sink.get()); // Repeated same-sink assignment is also a no-op.
+        QTest::qWait(150);
+        QCOMPARE(presentationRate, one);
+
+        // The QPointer must clear when a page's sink is destroyed. A new page
+        // can reuse the cached picture without adding a second new frame.
+        sink.reset();
+        QVERIFY(!decode.videoSink());
+        QVideoSink replacement;
+        decode.setVideoSink(&replacement);
+        QCOMPARE(replacement.videoFrame(), picture);
+        QTest::qWait(150);
+        QCOMPARE(presentationRate, one);
+        QTRY_COMPARE_WITH_TIMEOUT(presentationRate, zero, 2000);
+        decode.setVideoSink(nullptr);
+        decode.setVideoSink(&replacement);
+        QTest::qWait(150);
+        QCOMPARE(presentationRate, zero);
+
+        receiver.stop();
+        QCOMPARE(presentationRate, stopped);
+        QVERIFY(!replacement.videoFrame().isValid());
+        decode.setVideoSink(nullptr);
+        decode.setVideoSink(&replacement);
+        QCOMPARE(presentationRate, stopped);
+        QVERIFY(!replacement.videoFrame().isValid());
+        QVERIFY(receiver.start(QStringLiteral("127.0.0.1"), 0, true));
+        QCOMPARE(presentationRate, zero);
+        QVERIFY(!replacement.videoFrame().isValid());
+        receiver.stop();
+    }
+
+    void synchronousSinkChanges()
+    {
+        UdpVideoReceiver receiver;
+        SimulationVideoDecode decode(receiver, false);
+        QString status, presentationRate;
+        connect(&decode, &SimulationVideoDecode::statusChanged, this, [&](const QString &text) { status = text; });
+        connect(&decode, &SimulationVideoDecode::presentationRateChanged, this,
+                [&](const QString &text) { presentationRate = text; });
+        const auto zero = QStringLiteral("最近 1 秒控件交付：0 帧/秒");
+        const auto one = QStringLiteral("最近 1 秒控件交付：1 帧/秒");
+        const auto stopped = QStringLiteral("最近 1 秒控件交付：—");
+        const auto loopback = QStringLiteral("127.0.0.1");
+        QVERIFY(receiver.start(loopback, 0, true));
+        sendThreePictures(receiver);
+        QTRY_VERIFY_WITH_TIMEOUT(status.contains(QStringLiteral("等待输入 · 已解码 3 帧")), 5000);
+        QCoreApplication::sendPostedEvents(&decode, QEvent::MetaCall);
+
+        QVideoSink sink;
+        int delivered = 0;
+        const auto detach = connect(&sink, &QVideoSink::videoFrameChanged, this, [&](const QVideoFrame &frame) {
+            if (frame.isValid()) {
+                ++delivered;
+                decode.setVideoSink(nullptr);
+            }
+        });
+        decode.setVideoSink(&sink);
+        QCOMPARE(delivered, 1);
+        QVERIFY(!decode.videoSink());
+        QVERIFY(!sink.videoFrame().isValid());
+        // A sink that unmounts while handling a valid frame still received it.
+        QTRY_COMPARE_WITH_TIMEOUT(presentationRate, one, 500);
+        disconnect(detach);
+        decode.setVideoSink(&sink);
+        QVERIFY(sink.videoFrame().isValid());
+        QTest::qWait(150);
+        QCOMPARE(presentationRate, one);
+        QTRY_COMPARE_WITH_TIMEOUT(presentationRate, zero, 2000);
+
+        bool reopened = false;
+        bool stoppedCleared = false;
+        bool changedSession = false;
+        const auto restart = connect(&sink, &QVideoSink::videoFrameChanged, this, [&](const QVideoFrame &frame) {
+            if (!frame.isValid() || changedSession)
+                return;
+            changedSession = true;
+            receiver.stop();
+            stoppedCleared = presentationRate == stopped;
+            reopened = receiver.start(loopback, 0, true);
+        });
+        // Stop/reopen synchronously inside the first NEW frame delivery. Its
+        // pre-notification count belongs to the old session and must be cleared.
+        sendThreePictures(receiver);
+        QTRY_VERIFY_WITH_TIMEOUT(changedSession, 5000);
+        QVERIFY(reopened);
+        QVERIFY(stoppedCleared);
+        QVERIFY(!sink.videoFrame().isValid());
+        QCOMPARE(presentationRate, zero);
+        disconnect(restart);
+        QTest::qWait(1100);
+        QCOMPARE(presentationRate, zero);
+        QVERIFY(!sink.videoFrame().isValid());
+        receiver.stop();
+        QCOMPARE(presentationRate, stopped);
     }
 };
 

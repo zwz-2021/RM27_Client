@@ -21,7 +21,8 @@ $closed = Invoke-ProductWindow $ConfigFile $WindowTitle $Configuration $director
                 $controls = Get-Controls
                 foreach ($id in @('connectionValue', 'seatLabel', 'identityValue', 'healthValue',
                                    'udpBindingLabel', 'udpCountersLabel', 'udpHeaderLabel', 'udpPacketAgeLabel', 'udpPacketRateLabel',
-                                   'udpFrameRateLabel', 'udpAssemblyLabel', 'udpLastFrameLabel', 'videoDecodeLabel', 'videoDecodeRateLabel', 'videoPreviewStatus')) {
+                                   'udpFrameRateLabel', 'udpAssemblyLabel', 'udpLastFrameLabel', 'videoDecodeLabel', 'videoDecodeRateLabel',
+                                   'videoPresentationRateLabel', 'videoPreviewStatus')) {
                     if ($controls.ContainsKey($id)) { $view[$id] = $controls[$id].Current.Name }
                 }
                 [Console]::WriteLine((ConvertTo-Json $view -Compress))

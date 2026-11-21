@@ -48,7 +48,7 @@ SimulationVideoDecode::SimulationVideoDecode(transport::UdpVideoReceiver &receiv
         const auto state = decoder_.status();
         updateDisplay(state, false);
         emit statusChanged(statusText(state));
-        refreshDecodeRate();
+        refreshRates();
     });
     connect(&receiver, &transport::UdpVideoReceiver::statusChanged, this, [this, &receiver] {
         if (receiver.status().state != video::UdpVideoState::Bound) {
@@ -72,7 +72,7 @@ SimulationVideoDecode::SimulationVideoDecode(transport::UdpVideoReceiver &receiv
         });
         setDisplayState(QStringLiteral("等待模拟画面"));
         refresh_.start();
-        refreshDecodeRate();
+        refreshRates();
         emit statusChanged(statusText(decoder_.status()));
     });
     connect(&receiver, &transport::UdpVideoReceiver::frameAssembled, this,
@@ -106,8 +106,7 @@ void SimulationVideoDecode::setVideoSink(QVideoSink *sink)
         sink_->setVideoFrame({});
     previousPresentation_.reset();
     sink_ = sink;
-    if (sink_)
-        sink_->setVideoFrame(currentFrame_);
+    deliverCurrentFrame();
     emit videoSinkChanged();
 }
 
@@ -126,15 +125,34 @@ void SimulationVideoDecode::queueFrame(video::DecodedVideoFrame frame)
     }
 }
 
-void SimulationVideoDecode::refreshDecodeRate()
+void SimulationVideoDecode::refreshRates()
 {
     quint64 count;
+    qint64 nowMs;
     {
         QMutexLocker lock(&frameMutex_);
-        const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count();
+        nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count();
         count = decodeRate_.countAt(nowMs);
     }
     emit decodeRateChanged(QStringLiteral("最近 1 秒解码输出：%1 帧/秒").arg(count));
+    emit presentationRateChanged(QStringLiteral("最近 1 秒控件交付：%1 帧/秒").arg(presentationRate_.countAt(nowMs)));
+}
+
+void SimulationVideoDecode::deliverCurrentFrame()
+{
+    if (!sink_)
+        return;
+    const auto frame = currentFrame_;
+    // Count the first actual delivery, including a first sink attached after
+    // decoding. Reattaching an already delivered frame and clearing a sink do
+    // not count. Set these before notifying the sink: its synchronous callback
+    // may detach it (delivery still counts) or stop/reopen (stop clears it).
+    if (!currentFrameDelivered_ && frame.isValid() && refresh_.isActive()) {
+        currentFrameDelivered_ = true;
+        const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count();
+        presentationRate_.record(nowMs);
+    }
+    sink_->setVideoFrame(frame);
 }
 
 void SimulationVideoDecode::presentLatest()
@@ -149,8 +167,9 @@ void SimulationVideoDecode::presentLatest()
         lastOutput_ = pendingSince_;
     }
     currentFrame_ = QVideoFrame(std::make_unique<SimulationPixelBuffer>(std::move(*frame)));
+    currentFrameDelivered_ = false;
+    deliverCurrentFrame();
     if (sink_) {
-        sink_->setVideoFrame(currentFrame_);
         if (traceVideo_) {
             const auto presented = Clock::now();
             if (previousPresentation_) {
@@ -232,6 +251,8 @@ void SimulationVideoDecode::stop()
             decodeRate_.clear();
         }
         currentFrame_ = {};
+        currentFrameDelivered_ = false;
+        presentationRate_.clear();
         if (sink_)
             sink_->setVideoFrame({});
         for (const auto &frame : sample_)
@@ -255,6 +276,7 @@ void SimulationVideoDecode::stop()
     }
     setDisplayState(QStringLiteral("已停止"));
     emit decodeRateChanged(QStringLiteral("最近 1 秒解码输出：—"));
+    emit presentationRateChanged(QStringLiteral("最近 1 秒控件交付：—"));
     emit statusChanged(QStringLiteral("本机模拟解码 · 已停止 · 已解码 0 帧"));
 }
 

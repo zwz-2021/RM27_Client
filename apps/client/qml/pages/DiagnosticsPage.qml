@@ -34,10 +34,12 @@ ScrollView {
           text: root.viewModel.udpCountersText
           wrapMode: Text.Wrap
         }
-        RowLayout {
+        GridLayout {
           Layout.fillWidth: true
           visible: packetRate.text.length > 0 || frameRate.text.length > 0
-          spacing: 16
+          columns: root.availableWidth >= 900 ? 4 : 2
+          columnSpacing: 16
+          rowSpacing: 8
           Label {
             id: packetRate
             objectName: "udpPacketRateLabel"
@@ -61,6 +63,20 @@ ScrollView {
             Layout.fillWidth: true
             wrapMode: Text.Wrap
           }
+          Label {
+            objectName: "videoPresentationRateLabel"
+            text: root.viewModel.videoPresentationRateText
+            visible: text.length > 0
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+          }
+        }
+        Label {
+          Layout.fillWidth: true
+          visible: root.viewModel.videoPresentationRateText.length > 0
+          text: "控件交付统计首次交给视频控件的新帧；切页后继续交付，不代表物理屏幕刷新率。"
+          color: "#526078"
+          wrapMode: Text.Wrap
         }
         Label {
           objectName: "udpPacketAgeLabel"

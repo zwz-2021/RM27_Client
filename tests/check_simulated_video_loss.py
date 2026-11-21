@@ -110,6 +110,7 @@ async def expect_waiting(window, description, capture_name, decoded):
     view = await window.observe(description + " (decoder status)",
                                 udpFrameRateLabel=r"^最近 1 秒完整组帧：[1-9]\d* 帧/秒$",
                                 videoDecodeRateLabel="^最近 1 秒解码输出：0 帧/秒$",
+                                videoPresentationRateLabel="^最近 1 秒控件交付：0 帧/秒$",
                                 videoDecodeLabel=rf"等待可解码画面（参数集和关键帧） · 已解码 {decoded} 帧"
                                                  r" · 1920×1080 · 排队 \d+ 帧 / \d+ 字节 · 输入丢弃 0 帧"
                                                  r"(?:\nFFmpeg 最近诊断 · [^\n]+)?$")
@@ -119,7 +120,8 @@ async def expect_waiting(window, description, capture_name, decoded):
     await window.action("overviewTab")
     return capture, {"frames": frames, "bytes": size,
                      "completeFrameRate": view["udpFrameRateLabel"],
-                     "decodeOutputRate": view["videoDecodeRateLabel"]}
+                     "decodeOutputRate": view["videoDecodeRateLabel"],
+                     "presentationRate": view["videoPresentationRateLabel"]}
 
 
 async def check_stale_red(window, set_health):
@@ -144,6 +146,7 @@ async def check_loss_series(window, sender, port, red_count, frame, red_packets,
                              udpPacketRateLabel=r"^最近 1 秒有效 UDP 收包：[1-9]\d* 包/秒$",
                              udpFrameRateLabel="^最近 1 秒完整组帧：0 帧/秒$",
                              videoDecodeRateLabel="^最近 1 秒解码输出：0 帧/秒$",
+                             videoPresentationRateLabel="^最近 1 秒控件交付：0 帧/秒$",
                              udpAssemblyLabel=rf"完整帧 {red_count}\b")
         await window.action("overviewTab")
         captures.append(await check_stale_red(window, set_health))
@@ -209,6 +212,7 @@ async def check_reordered_start(window, sender, port, red_count, red_packets, bl
                                        udpPacketRateLabel="^最近 1 秒有效 UDP 收包：0 包/秒$",
                                        udpFrameRateLabel="^最近 1 秒完整组帧：0 帧/秒$",
                                        videoDecodeRateLabel="^最近 1 秒解码输出：0 帧/秒$",
+                                       videoPresentationRateLabel="^最近 1 秒控件交付：0 帧/秒$",
                                        udpCountersLabel=rf"^有效包 {red_packets} · 丢弃 0\b")
     silent_age = packet_age_seconds(silent_view)
     require(silent_age >= red_age + 1.0, f"Packet age did not advance during silence: {red_age} -> {silent_age}")
@@ -236,6 +240,7 @@ async def check_reordered_start(window, sender, port, red_count, red_packets, bl
             "packetRateDuringSilence": silent_view["udpPacketRateLabel"],
             "completeFrameRateDuringSilence": silent_view["udpFrameRateLabel"],
             "decodeOutputRateDuringSilence": silent_view["videoDecodeRateLabel"],
+            "presentationRateDuringSilence": silent_view["videoPresentationRateLabel"],
             "firstReorderedFrameId": red_count, "blueFramesBeforeNextKeyframe": len(blue)}, red_packets + blue_packets
 
 
@@ -246,9 +251,10 @@ async def check_single_output_frame(window, sender, port, frame, frame_id, packe
     count = (len(frame) + 1391) // 1392
     require(count >= 2, "Single-frame probe requires at least two fragments")
     await window.action("diagnosticsTab")
-    await window.observe("all three rate windows empty before the isolated keyframe",
+    await window.observe("all four rate windows empty before the isolated keyframe",
                          udpPacketRateLabel="^最近 1 秒有效 UDP 收包：0 包/秒$",
                          udpFrameRateLabel="^最近 1 秒完整组帧：0 帧/秒$",
+                         videoPresentationRateLabel="^最近 1 秒控件交付：0 帧/秒$",
                          videoDecodeRateLabel="^最近 1 秒解码输出：0 帧/秒$")
     require(send_clip(sender, port, frame_id, [frame], reverse_first=reverse_first) == count, "Wrong probe packet count")
     source_port = sender.getsockname()[1]
@@ -260,20 +266,48 @@ async def check_single_output_frame(window, sender, port, frame, frame_id, packe
                                 udpPacketRateLabel="^最近 1 秒有效 UDP 收包：0 包/秒$",
                                 udpFrameRateLabel="^最近 1 秒完整组帧：0 帧/秒$",
                                 videoDecodeRateLabel="^最近 1 秒解码输出：1 帧/秒$",
+                                videoPresentationRateLabel="^最近 1 秒控件交付：1 帧/秒$",
                                 videoDecodeLabel=rf"已解码 {decoded + 1} 帧\b")
     await window.action("captureDecodeRate")
     quiet = await window.observe("one second without further decoded output expires the delayed picture",
                                  videoDecodeRateLabel="^最近 1 秒解码输出：0 帧/秒$",
+                                 videoPresentationRateLabel="^最近 1 秒控件交付：0 帧/秒$",
                                  videoDecodeLabel=rf"已解码 {decoded + 1} 帧\b")
     await expect_drained(window, "isolated first AU adds exactly one complete and decoded frame",
                          packets + count, frames + 1, decoded + 1, frame_id, source_port,
                          timeouts=timeouts, over_budget=over_budget, header=header)
+    tab_switches = []
+    for index in range(3):
+        # Main.qml retains the VideoOutput while its StackLayout page is hidden.
+        # With no new output, switching pages must not turn the retained frame into
+        # a new presentation. Sample across several 100 ms metric refreshes, and
+        # fail on any nonzero read instead of waiting for a spurious count to expire.
+        await window.action("overviewTab")
+        await window.action("diagnosticsTab")
+        started = time.monotonic()
+        samples = []
+        while True:
+            view = await window.action("snapshot")
+            elapsed = time.monotonic() - started
+            require(view.get("videoPresentationRateLabel") == "最近 1 秒控件交付：0 帧/秒",
+                    f"Tab switch {index + 1} counted an old picture at {elapsed:.3f}s: {view}")
+            require(view.get("videoDecodeRateLabel") == "最近 1 秒解码输出：0 帧/秒",
+                    f"Unexpected decoder output after tab switch {index + 1} at {elapsed:.3f}s: {view}")
+            samples.append({"afterMilliseconds": round(elapsed * 1000, 1), **view})
+            if elapsed >= 0.3:
+                break
+            await asyncio.sleep(0.05)
+        tab_switches.append({"switch": index + 1, "samples": samples})
+    await window.action("overviewTab")
     return {"frameId": frame_id, "frameBytes": len(frame), "packets": count,
             "lastReceivedSlice": 0 if reverse_first else count - 1,
             "sessionPacketsAfterProbe": packets + count, "sessionFramesAfterProbe": frames + 1,
             "sessionDecodedAfterProbe": decoded + 1,
             "decodeOutputRateDuringDrain": tail["videoDecodeRateLabel"],
-            "decodeOutputRateAfterSilence": quiet["videoDecodeRateLabel"]}
+            "decodeOutputRateAfterSilence": quiet["videoDecodeRateLabel"],
+            "presentationRateDuringDrain": tail["videoPresentationRateLabel"],
+            "presentationRateAfterSilence": quiet["videoPresentationRateLabel"],
+            "silentTabSwitches": tab_switches}
 
 
 async def verify(configuration, evidence, scenario):
@@ -304,6 +338,11 @@ async def verify(configuration, evidence, scenario):
             await set_health(321)
             await window.observe("first live MQTT value while waiting for video", connectionValue="^五类订阅就绪$",
                                  videoPreviewStatus="^等待模拟画面$", healthValue="^321$")
+            await window.action("diagnosticsTab")
+            await window.observe("no picture delivered before the first video input",
+                                 videoDecodeRateLabel="^最近 1 秒解码输出：0 帧/秒$",
+                                 videoPresentationRateLabel="^最近 1 秒控件交付：0 帧/秒$")
+            await window.action("overviewTab")
             with exclusive_udp(0) as sender:
                 source_port = sender.getsockname()[1]
 
@@ -342,6 +381,7 @@ async def verify(configuration, evidence, scenario):
                     await window.action("diagnosticsTab")
                     recovered_rate = await window.observe("complete blue recording resumes real decoder output",
                                                           udpFrameRateLabel=r"^最近 1 秒完整组帧：[1-9]\d* 帧/秒$",
+                                                          videoPresentationRateLabel=r"^最近 1 秒控件交付：[1-9]\d* 帧/秒$",
                                                           videoDecodeRateLabel=r"^最近 1 秒解码输出：[1-9]\d* 帧/秒$")
                     await window.action("overviewTab")
                     await set_health(323)
@@ -363,6 +403,7 @@ async def verify(configuration, evidence, scenario):
             captures.append(await expect_pixels(window, "stopped", [EMPTY], tolerance=5))
             await window.action("diagnosticsTab")
             await window.observe("stopped decoder has no active output-rate window",
+                                 videoPresentationRateLabel="^最近 1 秒控件交付：—$",
                                  videoDecodeRateLabel="^最近 1 秒解码输出：—$")
 
     client_packets = [row for row in packets if row["clientId"] == "3"]
@@ -383,6 +424,7 @@ async def verify(configuration, evidence, scenario):
             "receivedPackets": total_packets, "assembledFrames": assembled,
             "decodedFrames": decoded,
             "decodeOutputRateDuringRecovery": recovered_rate["videoDecodeRateLabel"],
+            "presentationRateDuringRecovery": recovered_rate["videoPresentationRateLabel"],
             "pendingFragments": 0, "bufferedBytes": 0, "decoderQueuedBytes": 0, "captures": captures,
             "mqttHealthInWindow": [321, 322, 323], "clientBusinessPublishes": 0,
             "releasedPorts": {"udp": port, "mqtt": mqtt_port, "web": web_port}}

@@ -131,6 +131,8 @@ int ClientApplication::run(QGuiApplication &app)
                          &viewModel, &presentation::ClientViewModel::setVideoDecodeText);
         QObject::connect(simulationDecode.get(), &SimulationVideoDecode::decodeRateChanged,
                          &viewModel, &presentation::ClientViewModel::setVideoDecodeRateText);
+        QObject::connect(simulationDecode.get(), &SimulationVideoDecode::presentationRateChanged,
+                         &viewModel, &presentation::ClientViewModel::setVideoPresentationRateText);
         QObject::connect(simulationDecode.get(), &SimulationVideoDecode::logRecord, &viewModel, logVideo);
     }
     QObject::connect(&udp, &transport::UdpVideoReceiver::statusChanged, &viewModel, [&] {

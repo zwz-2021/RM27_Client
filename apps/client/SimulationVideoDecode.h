@@ -33,6 +33,7 @@ signals:
     void displayStateChanged();
     void statusChanged(const QString &text);
     void decodeRateChanged(const QString &text);
+    void presentationRateChanged(const QString &text);
     void logRecord(const QString &level, const QString &event, const QString &detail);
 
 private:
@@ -44,7 +45,8 @@ private:
     };
     void queueFrame(video::DecodedVideoFrame frame);
     void presentLatest();
-    void refreshDecodeRate();
+    void deliverCurrentFrame();
+    void refreshRates();
     void updateDisplay(const video::HevcStreamStatus &state, bool newFrame);
     void setDisplayState(const QString &text, bool stale = false);
     QString statusText(const video::HevcStreamStatus &state) const;
@@ -56,6 +58,9 @@ private:
     quint64 otherSourceFrames_ = 0;
     QPointer<QVideoSink> sink_;
     QVideoFrame currentFrame_;
+    // GUI-thread state: remounting the same picture is not a new frame.
+    bool currentFrameDelivered_ = false;
+    transport::OneSecondCountWindow presentationRate_;
     Clock::time_point lastInput_, lastOutput_;
     const bool traceVideo_;
     std::optional<Clock::time_point> previousPresentation_;
