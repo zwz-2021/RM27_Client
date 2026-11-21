@@ -76,7 +76,7 @@ ApplicationWindow {
     }
     Label {
       Layout.fillWidth: true
-      text: root.viewModel.preview ? "开发预览 · 无外部比赛数据" : "五类基础消息接收"
+      text: root.viewModel.preview ? "开发预览 · 无外部比赛数据" : "六类状态消息接收"
       color: "#748096"
       font.pixelSize: 12
     }

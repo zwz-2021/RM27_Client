@@ -8,7 +8,7 @@
 
 namespace rm27::transport {
 
-// A five-topic MQTT 3.1.1 receiver. The Paho callbacks never access Qt objects;
+// A six-topic MQTT 3.1.1 receiver. The Paho callbacks never access Qt objects;
 // a bounded mailbox is drained on the object's thread. Static identity changes
 // are ordered barriers, never coalesced away. Each connection attempt owns a new
 // callback context, which is retired before destruction, preventing old writes.

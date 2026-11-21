@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-// Local 2027 V1.0.0 (20261029), chapter 2. Only the step-1 messages.
+// Local 2027 V1.0.0 (20261029), chapter 2. Implemented receive contracts.
 // Package is an internal code namespace; MQTT topic and payload have no wrapper.
 package rm27.wire;
 
@@ -77,4 +77,21 @@ message RobotDynamicStatus {
   optional uint32 out_of_combat_countdown = 11;
   optional bool can_remote_heal = 12;
   optional bool can_remote_ammo = 13;
+}
+
+// 2.2.12, PDF 63-64. Fields 1-10: 0 offline / 1 online / 2 invalid installation.
+// Field 7 is a single aggregate armor-module state, not per-plate data.
+message RobotModuleStatus {
+  optional uint32 power_manager = 1;
+  optional uint32 rfid = 2;
+  optional uint32 light_strip = 3;
+  optional uint32 small_shooter = 4;
+  optional uint32 big_shooter = 5;
+  optional uint32 uwb = 6;
+  optional uint32 armor = 7;
+  optional uint32 video_transmission = 8;
+  optional uint32 capacitor = 9;
+  optional uint32 main_controller = 10;
+  // Heavy robot's permission to install the modular 42mm launcher: only 0/1.
+  optional uint32 modular_42mm = 11;
 }

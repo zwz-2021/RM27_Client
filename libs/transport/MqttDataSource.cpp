@@ -17,10 +17,10 @@
 
 namespace rm27::transport {
 namespace {
-constexpr std::array<const char *, 5> topics{
+constexpr std::array<const char *, 6> topics{
     "GameStatus", "GlobalUnitStatus", "GlobalLogisticsStatus",
-    "RobotStaticStatus", "RobotDynamicStatus"};
-// Engineering bounds, not official message lengths. Four latest-value slots,
+    "RobotStaticStatus", "RobotDynamicStatus", "RobotModuleStatus"};
+// Engineering bounds, not official message lengths. Five latest-value slots,
 // eight ordered static identity barriers and one diagnostic slot are bounded;
 // there is no Qt per-packet event queue.
 constexpr int maximumPayload = 1024 * 1024;
@@ -46,11 +46,11 @@ struct MqttDataSource::Context {
     std::mutex mutex;
     bool accepting = true;
     bool connected = false;
-    std::array<bool, 5> accepted{};
-    std::array<std::optional<Pending>, 5> latest;
+    std::array<bool, topics.size()> accepted{};
+    std::array<std::optional<Pending>, topics.size()> latest;
     std::deque<Pending> staticBarriers;
     quint64 arrival = 0;
-    std::array<Subscription, 5> subscriptions;
+    std::array<Subscription, topics.size()> subscriptions;
     QString failure;
     QString diagnostic;
 
@@ -121,7 +121,7 @@ struct MqttDataSource::Context {
                         && std::memcmp(name, topics[i], length) == 0) index = i;
                 }
                 if (!index) {
-                    self.diagnostic = QStringLiteral("已丢弃不在本轮五类订阅中的 Topic。");
+                    self.diagnostic = QStringLiteral("已丢弃不在本轮六类订阅中的 Topic。");
                 } else if (message->retained) {
                     self.diagnostic = QStringLiteral("已忽略 %1 的保留报文，等待本次连接后的实时数据。")
                         .arg(QString::fromLatin1(topics[*index]));
@@ -242,7 +242,7 @@ void MqttDataSource::subscribe()
     subscribing_ = true;
     phaseClock_.restart();
     emit connectionChanged(domain::ConnectionState::Subscribing,
-        QStringLiteral("MQTT 已连接，正在确认五类基础消息订阅……"));
+        QStringLiteral("MQTT 已连接，正在确认六类消息订阅……"));
     if (!active_ || generation != generation_) return;
     for (std::size_t i = 0; i < topics.size(); ++i) {
         MQTTAsync_responseOptions options = MQTTAsync_responseOptions_initializer;
@@ -264,7 +264,7 @@ void MqttDataSource::drain()
     const auto generation = generation_;
     QString failure, diagnostic;
     bool connected = false, allAccepted = true;
-    std::array<std::optional<Context::Pending>, 5> latest;
+    std::array<std::optional<Context::Pending>, topics.size()> latest;
     std::deque<Context::Pending> staticBarriers;
     {
         std::lock_guard lock(context_->mutex);
@@ -286,7 +286,7 @@ void MqttDataSource::drain()
         ready_ = true;
         nextRetryMs_ = initialRetryMs;
         emit connectionChanged(domain::ConnectionState::Connected,
-            QStringLiteral("五类基础消息订阅就绪（QoS≤1）；收到报文后显示数据。"));
+            QStringLiteral("六类消息订阅就绪（QoS≤1）；收到报文后显示数据。"));
         if (!active_ || generation != generation_) return;
     }
     if (!ready_ && phaseClock_.elapsed() >= timeoutMs_) {
@@ -298,7 +298,7 @@ void MqttDataSource::drain()
     // Preserve every static barrier as well as order across the remaining latest
     // values. An overwritten mismatching identity must still clear old data.
     std::vector<std::pair<std::size_t, Context::Pending>> packets;
-    packets.reserve(4 + staticBarriers.size());
+    packets.reserve(topics.size() - 1 + staticBarriers.size());
     for (std::size_t i = 0; i < latest.size(); ++i) {
         if (latest[i]) packets.emplace_back(i, std::move(*latest[i]));
     }

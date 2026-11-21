@@ -32,6 +32,13 @@ class StateManager:
     BASIC_ROBOT_IDS = (1, 3, 4, 5, 6, 7, 101, 103, 104, 105, 106, 107)
     TEAM_NAMES = ("red", "blue")
     FORTRESS_CAPTURE_DURATION_SEC = 20
+    # Fixed 2027 communication protocol §2.2.12, PDF 63–64. Armor is one
+    # optional scalar; the message does not identify individual armor plates.
+    MODULE_STATUS_FIELDS = (
+        "power_manager", "rfid", "light_strip", "small_shooter", "big_shooter",
+        "uwb", "armor", "video_transmission", "capacitor", "main_controller",
+        "modular_42mm",
+    )
 
     def __init__(self):
         self.lock = threading.Lock()
@@ -98,6 +105,7 @@ class StateManager:
         self.robot_static_status = self._create_robot_static_status_state()
         self.robot_dynamic_status = self._create_robot_dynamic_status_state()
         self.robot_module_status = self._create_robot_module_status_state()
+        self.robot_module_publishing = True
         self.sentry_status_sync = {
             "posture_id": 0,
             "is_weakened": False,
@@ -168,13 +176,16 @@ class StateManager:
         self.robot_ids = list(self.BASIC_ROBOT_IDS)
         self.robot_static_by_id = {}
         self.robot_dynamic_by_id = {}
+        self.robot_module_by_id = {}
         for rid in self.robot_ids:
             self.current_robot_id = rid
             self.robot_static_by_id[rid] = self._create_robot_static_status_state()
             self.robot_dynamic_by_id[rid] = self._create_robot_dynamic_status_state()
+            self.robot_module_by_id[rid] = self._create_robot_module_status_state()
         self.current_robot_id = 1
         self.robot_static_status = self.robot_static_by_id[1]
         self.robot_dynamic_status = self.robot_dynamic_by_id[1]
+        self.robot_module_status = self.robot_module_by_id[1]
 
         self.robot_injury_stats = {
             rid: self._empty_robot_injury_stat() for rid in self.robot_ids
@@ -338,21 +349,11 @@ class StateManager:
             "can_remote_ammo": True,
         }
 
-    @staticmethod
-    def _create_robot_module_status_state():
-        return {
-            "power_manager": 1,
-            "rfid": 1,
-            "light_strip": 1,
-            "small_shooter": 1,
-            "big_shooter": 1,
-            "uwb": 1,
-            "armor": 1,
-            "video_transmission": 1,
-            "capacitor": 1,
-            "main_controller": 1,
-            "laser_detection_module": 1,
-        }
+    @classmethod
+    def _create_robot_module_status_state(cls):
+        # None means omitted, not an online module. The console supplies
+        # explicit fixtures instead of silently creating "all healthy" data.
+        return dict.fromkeys(cls.MODULE_STATUS_FIELDS)
 
     @staticmethod
     def _normalize_sentry_posture_id(posture_id):
@@ -1349,6 +1350,7 @@ class StateManager:
             raise ValueError("当前基础数据支持的机器人编号中不存在此编号")
         with self.lock:
             self.current_robot_id = rid
+            self.robot_module_status = self.robot_module_by_id[rid]
             self._sync_basic_robot_locked()
 
     @staticmethod
@@ -1514,17 +1516,31 @@ class StateManager:
             return dict(self.robot_dynamic_status)
 
     def set_robot_module_status(self, payload=None):
-        with self.lock:
-            normalized = self._create_robot_module_status_state()
-            source = dict(payload or {})
-            for key, default_value in normalized.items():
-                normalized[key] = self._normalize_robot_status_uint(
-                    source.get(key, default_value),
-                    default_value,
+        source = dict(payload or {})
+        unknown = set(source) - set(self.MODULE_STATUS_FIELDS) - {"command", "expected_robot_id"}
+        if unknown:
+            raise ValueError(f"RobotModuleStatus 未定义字段：{', '.join(sorted(unknown))}")
+        normalized = self._create_robot_module_status_state()
+        for key in normalized:
+            value = source.get(key)
+            if value is not None:
+                normalized[key] = self._check_basic_uint(
+                    value, key, 1 if key == "modular_42mm" else 2
                 )
+        with self.lock:
+            if ("expected_robot_id" in source and
+                    self._check_basic_uint(source["expected_robot_id"], "expected_robot_id") != self.current_robot_id):
+                raise ValueError("当前机器人已切换，请确认模块表单后重新保存")
+            self.robot_module_by_id[int(self.current_robot_id)] = normalized
             self.robot_module_status = normalized
             self.log("Referee", f"Set RobotModuleStatus: {normalized}")
             return dict(self.robot_module_status)
+
+    def set_robot_module_publishing(self, enabled):
+        if not isinstance(enabled, bool):
+            raise ValueError("模块周期发布开关必须是布尔值")
+        with self.lock:
+            self.robot_module_publishing = enabled
 
     def get_robot_module_status(self):
         with self.lock:
@@ -3044,6 +3060,7 @@ class StateManager:
                 "robotStaticStatus": dict(self.robot_static_status),
                 "robotDynamicStatus": dict(self.robot_dynamic_status),
                 "robotModuleStatus": dict(self.robot_module_status),
+                "robotModulePublishing": self.robot_module_publishing,
                 "sentryStatusSync": dict(self.sentry_status_sync),
                 "lastSentryCtrlResult": dict(self.last_sentry_ctrl_result),
                 "robotPathPlanInfo": {

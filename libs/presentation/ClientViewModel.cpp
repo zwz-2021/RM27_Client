@@ -285,7 +285,7 @@ QString ClientViewModel::connectionText() const
     case domain::ConnectionState::Connecting: return QStringLiteral("连接中");
     case domain::ConnectionState::Subscribing: return QStringLiteral("Broker 已连接 · 正在订阅");
     case domain::ConnectionState::Connected:
-        return preview() ? QStringLiteral("预览运行中") : QStringLiteral("五类订阅就绪");
+        return preview() ? QStringLiteral("预览运行中") : QStringLiteral("六类订阅就绪");
     case domain::ConnectionState::RetryWaiting: return QStringLiteral("等待重连");
     case domain::ConnectionState::Unavailable: return QStringLiteral("连接不可用");
     }
@@ -483,6 +483,95 @@ QString ClientViewModel::unitsSummary() const
         .arg(number(value->total_CP_enemy));
 }
 
+
+QString ClientViewModel::moduleStatusText() const
+{
+    return status(session_.basicState().robotModule);
+}
+
+QString ClientViewModel::moduleSummary() const
+{
+    return QStringLiteral("装甲为协议提供的整体模块状态，不代表四块装甲分别在线。\n"
+                          "42mm 安装权限独立于测速模块状态；不适用项不计作离线故障。");
+}
+
+QVariantList ClientViewModel::moduleRows() const
+{
+    using Role = domain::RobotRole;
+    using Data = domain::RobotModuleData;
+    // RMUC, fabrication specification table 3-3, PDF 47-48. Role applicability
+    // describes the configured module set, never an inferred received value.
+    constexpr unsigned heavy = 1, infantry = 2, aerial = 4, sentry = 8, dart = 16, radar = 32;
+    constexpr unsigned all = heavy | infantry | aerial | sentry | dart | radar;
+    constexpr unsigned ground = heavy | infantry | sentry;
+    struct Field {
+        const char *name;
+        const char *label;
+        std::optional<std::uint32_t> Data::*member;
+        unsigned roles;
+        bool permission = false;
+    };
+    static constexpr std::array<Field, 11> fields{{
+        {"power_manager", "电源管理", &Data::power_manager, all},
+        {"rfid", "RFID / 场地交互", &Data::rfid, ground},
+        {"light_strip", "灯条", &Data::light_strip, ground},
+        {"small_shooter", "17mm 测速", &Data::small_shooter, infantry | sentry},
+        {"big_shooter", "42mm 测速", &Data::big_shooter, heavy},
+        {"uwb", "定位", &Data::uwb, ground},
+        {"armor", "装甲模块（整体）", &Data::armor, ground},
+        {"video_transmission", "图传模块", &Data::video_transmission, ground | aerial},
+        {"capacitor", "电容", &Data::capacitor, ground},
+        {"main_controller", "主控", &Data::main_controller, all},
+        {"modular_42mm", "模块化 42mm 安装权限", &Data::modular_42mm, heavy, true}
+    }};
+    const auto &sample = session_.basicState().robotModule;
+    const auto *identity = fresh(session_.basicState().robotStatic);
+    // Only a current matching static identity grants role context; robot_type's
+    // fallback is not used to bypass the configured receive identity gate.
+    const auto robot = identity && identity->robot_id == static_cast<std::uint32_t>(session_.robotId())
+        ? domain::identifyRobot(*identity->robot_id) : std::nullopt;
+    unsigned role = 0;
+    if (robot) {
+        switch (robot->role) {
+        case Role::Heavy: role = heavy; break;
+        case Role::Infantry: role = infantry; break;
+        case Role::Aerial: role = aerial; break;
+        case Role::Sentry: role = sentry; break;
+        case Role::Dart: role = dart; break;
+        case Role::Radar: role = radar; break;
+        default: break;
+        }
+    }
+    QVariantList rows;
+    for (const auto &field : fields) {
+        const auto value = sample.value ? (*sample.value).*field.member : std::nullopt;
+        const bool applicable = (field.roles & role) != 0;
+        QString state, text;
+        if (!role) {
+            state = QStringLiteral("waiting_identity"); text = QStringLiteral("等待本机器人身份");
+        } else if (!applicable) {
+            state = QStringLiteral("not_applicable"); text = QStringLiteral("不适用");
+            if (value && !sample.stale) text += QStringLiteral("（收到原值 %1）").arg(*value);
+        } else if (sample.stale) {
+            state = QStringLiteral("stale"); text = QStringLiteral("数据已过期");
+        } else if (!value) {
+            state = QStringLiteral("missing"); text = QStringLiteral("未收到");
+        } else if (field.permission) {
+            state = *value ? QStringLiteral("permission_granted") : QStringLiteral("permission_denied");
+            text = *value ? QStringLiteral("拥有安装权限（1）") : QStringLiteral("未拥有安装权限（0）");
+        } else {
+            const std::array<QString, 3> states{QStringLiteral("offline"), QStringLiteral("online"), QStringLiteral("installation_invalid")};
+            const std::array<QString, 3> labels{QStringLiteral("离线（0）"), QStringLiteral("在线（1）"), QStringLiteral("安装不规范，视为离线（2）")};
+            state = states.at(*value); text = labels.at(*value);
+        }
+        rows.append(QVariantMap{{"field", QString::fromLatin1(field.name)},
+            {"label", QString::fromUtf8(field.label)}, {"state", state}, {"text", text},
+            {"applicable", role ? QVariant(applicable) : QVariant()},
+            {"value", value ? QVariant::fromValue(*value) : QVariant()}});
+    }
+    return rows;
+}
+
 QVariantList ClientViewModel::topicStates() const
 {
     const auto &state = session_.basicState();
@@ -490,7 +579,8 @@ QVariantList ClientViewModel::topicStates() const
             topicEntry(QStringLiteral("GlobalUnitStatus"), state.units),
             topicEntry(QStringLiteral("GlobalLogisticsStatus"), state.logistics),
             topicEntry(QStringLiteral("RobotStaticStatus"), state.robotStatic),
-            topicEntry(QStringLiteral("RobotDynamicStatus"), state.robotDynamic)};
+            topicEntry(QStringLiteral("RobotDynamicStatus"), state.robotDynamic),
+            topicEntry(QStringLiteral("RobotModuleStatus"), state.robotModule)};
 }
 
 QVariantMap ClientViewModel::basicEvidence() const
@@ -502,7 +592,9 @@ QVariantMap ClientViewModel::basicEvidence() const
             {QStringLiteral("game"), gameText()}, {QStringLiteral("gameSummary"), gameSummary()},
             {QStringLiteral("economy"), economyText()}, {QStringLiteral("logistics"), logisticsSummary()},
             {QStringLiteral("units"), unitsSummary()}, {QStringLiteral("topics"), topicStates()},
-            {QStringLiteral("diagnostic"), diagnosticText()}};
+            {QStringLiteral("diagnostic"), diagnosticText()},
+            {QStringLiteral("moduleStatus"), moduleStatusText()},
+            {QStringLiteral("modulesSummary"), moduleSummary()}, {QStringLiteral("moduleRows"), moduleRows()}};
 }
 
 QString ClientViewModel::startupError() const { return startupError_; }

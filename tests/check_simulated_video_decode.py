@@ -83,7 +83,7 @@ async def verify(configuration, evidence):
                   "video": {"bindAddress": target[0], "port": port}})
         async with open_window(config, title, configuration, trace_video=True) as window:
             await window.observe("legacy profile starts without a selected seat",
-                                 connectionValue="^五类订阅就绪$", seatLabel=r"未指定（只读）")
+                                 connectionValue="^六类订阅就绪$", seatLabel=r"未指定（只读）")
             with exclusive_udp(port):
                 pass
             await window.action("stopButton")
@@ -92,7 +92,7 @@ async def verify(configuration, evidence):
             await window.observe("saved personal infantry seat without closing the window", seatLabel=r"步兵（只读）")
             require(json.loads(config.read_text(encoding="utf-8"))["seat"] == "infantry", "Seat was not saved")
             await window.action("startButton")
-            await window.observe("first infantry receive session", connectionValue="^五类订阅就绪$")
+            await window.observe("first infantry receive session", connectionValue="^六类订阅就绪$")
             await window.action("diagnosticsTab")
             await window.observe("waiting for first recording", udpBindingLabel=rf"已绑定 127\.0\.0\.1:{port}\b",
                                  videoDecodeLabel=r"已解码 0 帧")
@@ -118,7 +118,7 @@ async def verify(configuration, evidence):
                     "The web simulator kept its encoder, worker or socket after stop")
             await window.action("overviewTab")
             await window.action("startButton")
-            await window.observe("reopened MQTT session", connectionValue="^五类订阅就绪$")
+            await window.observe("reopened MQTT session", connectionValue="^六类订阅就绪$")
             await services.aclose()
             await window.observe("broker is offline during the finite recording", connectionValue="^等待重连$")
             await window.action("diagnosticsTab")
@@ -145,7 +145,7 @@ async def verify(configuration, evidence):
     compare_frames(finite_trace, finite_hashes)
     json_file(evidence / "broker-packets.json", packets)
     topics = [tuple(pair) for row in packets if row["kind"] == "subscribe" for pair in row["topics"]]
-    require(sorted(topics) == sorted([(topic, 1) for topic in TOPICS] * 3), "Expected three five-topic sessions")
+    require(sorted(topics) == sorted([(topic, 1) for topic in TOPICS] * 3), "Expected three six-topic sessions")
     require(not any(row["kind"] == "client-publish" for row in packets), "Unexpected client business publish")
     with exclusive_udp(port), socket.socket() as probe:
         probe.settimeout(1)

@@ -60,6 +60,9 @@ class ClientViewModel : public QObject {
     Q_PROPERTY(QString economyText READ economyText NOTIFY basicStateChanged)
     Q_PROPERTY(QString logisticsSummary READ logisticsSummary NOTIFY basicStateChanged)
     Q_PROPERTY(QString unitsSummary READ unitsSummary NOTIFY basicStateChanged)
+    Q_PROPERTY(QString moduleStatusText READ moduleStatusText NOTIFY basicStateChanged)
+    Q_PROPERTY(QString moduleSummary READ moduleSummary NOTIFY basicStateChanged)
+    Q_PROPERTY(QVariantList moduleRows READ moduleRows NOTIFY basicStateChanged)
     Q_PROPERTY(QVariantList topicStates READ topicStates NOTIFY basicStateChanged)
 
 public:
@@ -117,6 +120,9 @@ public:
     QString economyText() const;
     QString logisticsSummary() const;
     QString unitsSummary() const;
+    QString moduleStatusText() const;
+    QString moduleSummary() const;
+    QVariantList moduleRows() const;
     QVariantList topicStates() const;
 
     // Read-only evidence from the same projection displayed by QML.

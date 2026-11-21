@@ -137,6 +137,7 @@ ScrollView {
     Label {
       Layout.fillWidth: true
       objectName: "diagnosticLabel"
+      Accessible.id: "diagnosticLabel"
       visible: root.viewModel.diagnosticText.length > 0
       text: root.viewModel.diagnosticText
       color: "#b42318"
@@ -184,6 +185,52 @@ ScrollView {
       }
     }
 
+    Frame {
+      Layout.fillWidth: true
+      visible: !root.viewModel.preview
+      padding: 20
+      ColumnLayout {
+        anchors.fill: parent
+        spacing: 10
+        Label {
+          objectName: "moduleStatus"
+          Accessible.id: "moduleStatus"
+          text: "机器人模块 · " + root.viewModel.moduleStatusText
+          font.bold: true
+        }
+        GridLayout {
+          Layout.fillWidth: true
+          columns: root.availableWidth >= 900 ? 2 : 1
+          columnSpacing: 24
+          rowSpacing: 10
+          Repeater {
+            model: root.viewModel.moduleRows
+            delegate: Label {
+              required property var modelData
+              Layout.fillWidth: true
+              Layout.preferredWidth: 1
+              objectName: "module_" + modelData.field
+              Accessible.id: objectName
+              text: modelData.label + "：" + modelData.text
+              textFormat: Text.PlainText
+              wrapMode: Text.Wrap
+              color: modelData.state === "online" || modelData.state === "permission_granted" ? "#067647"
+                : (modelData.state === "offline" || modelData.state === "installation_invalid" ? "#b42318"
+                  : (modelData.state === "stale" ? "#b45309" : "#526078"))
+            }
+          }
+        }
+        Label {
+          objectName: "moduleSummary"
+          Accessible.id: "moduleSummary"
+          Layout.fillWidth: true
+          text: root.viewModel.moduleSummary
+          color: "#748096"
+          wrapMode: Text.Wrap
+        }
+      }
+    }
+
     InfoCard {
       Layout.fillWidth: true
       visible: !root.viewModel.preview
@@ -219,7 +266,7 @@ ScrollView {
         }
         Label {
           Layout.fillWidth: true
-          text: root.viewModel.infantrySeat ? "图传 UDP 收包计数可在“运行信息”查看。" : "当前显示五类基础消息的接收状态。"
+          text: root.viewModel.infantrySeat ? "图传 UDP 收包计数可在“运行信息”查看。" : "当前显示六类消息的接收状态。"
           color: "#748096"
           wrapMode: Text.Wrap
         }

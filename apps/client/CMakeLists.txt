@@ -27,6 +27,11 @@ if(BUILD_TESTING)
     set_target_properties(RM27_SessionCheck PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
     add_test(NAME basic_session COMMAND RM27_SessionCheck)
 
+    add_executable(RM27_ModuleStatusCheck ../../tests/ModuleStatusCheck.cpp)
+    target_link_libraries(RM27_ModuleStatusCheck PRIVATE rm27_presentation rm27_protocol)
+    set_target_properties(RM27_ModuleStatusCheck PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+    add_test(NAME module_status COMMAND RM27_ModuleStatusCheck)
+
     add_executable(RM27_LinkDiagnosticsCheck ../../tests/LinkDiagnosticsCheck.cpp
         LinkDiagnostics.cpp LinkDiagnostics.h)
     target_include_directories(RM27_LinkDiagnosticsCheck PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")

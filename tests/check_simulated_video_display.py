@@ -86,7 +86,7 @@ async def verify(configuration, evidence):
                            "mqtt": {"host": "127.0.0.1", "port": mqtt_port, "robotId": 3},
                            "video": {"bindAddress": "127.0.0.1", "port": port}})
         async with open_window(config, title, configuration) as window:
-            await window.observe("waiting for first picture", connectionValue="^五类订阅就绪$",
+            await window.observe("waiting for first picture", connectionValue="^六类订阅就绪$",
                                  videoPreviewStatus="^等待模拟画面$")
             captures.append(await expect_pixels(window, "waiting", [EMPTY], tolerance=5))
             streamer = VideoStreamer("127.0.0.1", port)
@@ -117,14 +117,14 @@ async def verify(configuration, evidence):
             finally:
                 streamer.stop()
             await window.action("startButton")
-            await window.observe("new session waits for a new recording", connectionValue="^五类订阅就绪$",
+            await window.observe("new session waits for a new recording", connectionValue="^六类订阅就绪$",
                                  videoPreviewStatus="^等待模拟画面$")
             captures.append(await expect_pixels(window, "reopened", [EMPTY], tolerance=5))
     with exclusive_udp(port):
         pass
     json_file(evidence / "broker-packets.json", packets)
     topics = [tuple(pair) for row in packets if row["kind"] == "subscribe" for pair in row["topics"]]
-    require(sorted(topics) == sorted([(topic, 1) for topic in TOPICS] * 2), "Expected two five-topic sessions")
+    require(sorted(topics) == sorted([(topic, 1) for topic in TOPICS] * 2), "Expected two six-topic sessions")
     require(not any(row["kind"] == "client-publish" for row in packets), "Unexpected client business publish")
     return {"captures": captures, "clientBusinessPublishes": 0, "releasedUdpPort": port}
 

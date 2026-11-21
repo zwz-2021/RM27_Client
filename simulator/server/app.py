@@ -488,8 +488,10 @@ def create_app(args):
                 mqtt_publisher.publish_robot_dynamic_status(state_manager.get_state())
         elif cmd == "send_robot_module_status":
             state_manager.set_robot_module_status(data)
-            if mqtt_publisher:
-                mqtt_publisher.publish_robot_module_status(state_manager.get_state())
+            # Save a fixture; the existing 1 Hz worker is the only publish path
+            # for the console, so repeated clicks cannot exceed the frequency.
+        elif cmd == "set_robot_module_publishing":
+            state_manager.set_robot_module_publishing(data.get("enabled"))
         elif cmd == "set_robot_performance_selection_sync":
             state_manager.set_robot_performance_selection_sync(
                 shooter=data.get("shooter", 1),

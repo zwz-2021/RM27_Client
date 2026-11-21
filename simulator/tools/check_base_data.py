@@ -165,7 +165,7 @@ class BaseDataChecks(unittest.TestCase):
         self.publisher._publish_robot_dynamic_status(self.state.get_state())
         self.assertEqual(self.decode("RobotDynamicStatus").current_heat, maximum)
 
-    def test_periodic_workers_publish_only_five_migrated_topics(self):
+    def test_periodic_workers_publish_only_six_migrated_topics(self):
         counts = Counter()
         self.publisher._publish = lambda topic, payload, qos=1: counts.update([topic])
         self.publisher.connect = lambda: setattr(self.publisher, "connected", True) or True
@@ -175,10 +175,11 @@ class BaseDataChecks(unittest.TestCase):
             time.sleep(1.15)
         finally:
             self.publisher.stop()
-        self.assertEqual(set(counts), {"GameStatus", "GlobalUnitStatus", "GlobalLogisticsStatus", "RobotStaticStatus", "RobotDynamicStatus"})
+        self.assertEqual(set(counts), {"GameStatus", "GlobalUnitStatus", "GlobalLogisticsStatus", "RobotStaticStatus", "RobotDynamicStatus", "RobotModuleStatus"})
         self.assertTrue(5 <= counts["GameStatus"] <= 8, counts)
         self.assertTrue(9 <= counts["RobotDynamicStatus"] <= 15, counts)
         self.assertTrue(1 <= counts["GlobalUnitStatus"] <= 3, counts)
+        self.assertTrue(1 <= counts["RobotModuleStatus"] <= 3, counts)
         self.assertFalse(any(worker.is_alive() for worker in self.publisher._workers))
 
 

@@ -113,8 +113,15 @@ struct RobotDynamicData {
     std::optional<bool> can_remote_heal, can_remote_ammo;
 };
 
+// Communication 2.2.12: armor is one aggregate module state, not four plates.
+struct RobotModuleData {
+    std::optional<std::uint32_t> power_manager, rfid, light_strip, small_shooter;
+    std::optional<std::uint32_t> big_shooter, uwb, armor, video_transmission;
+    std::optional<std::uint32_t> capacitor, main_controller, modular_42mm;
+};
+
 using BasicMessage = std::variant<GameData, GlobalUnitData, LogisticsData,
-                                  RobotStaticData, RobotDynamicData>;
+                                  RobotStaticData, RobotDynamicData, RobotModuleData>;
 
 // Relative slots; blue IDs = red IDs + 100. Health includes both teams.
 inline constexpr std::array<int, 8> healthSlots{1, 3, 4, 7, 101, 103, 104, 107};

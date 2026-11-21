@@ -49,7 +49,7 @@ class MQTTPublisher:
     """
     MQTT 数据发布器
 
-    五类基础消息按本地《RoboMaster 2027 通信协议 V1.0.0》生成并发布。
+    六类接收消息按本地《RoboMaster 2027 通信协议 V1.0.0》生成并发布。
     未迁移的 RM26 角色工具仍保留；不属于本次 RM27 支持范围。
 
     主要 Topic:
@@ -658,6 +658,8 @@ class MQTTPublisher:
                     state = self.state_manager.get_state()
                     with self._periodic_publish_log_scope():
                         self._publish_robot_static_status(state)
+                        if state.get("robotModulePublishing", True):
+                            self._publish_robot_module_status(state)
                         self._publish_global_unit_status(state)
                         self._publish_global_logistics_status(
                             state.get("globalLogisticsStatus", state["gameStatus"])
@@ -1191,26 +1193,16 @@ class MQTTPublisher:
         return self._publish_robot_dynamic_status(source)
 
     def _publish_robot_module_status(self, state: Optional[dict] = None):
-        if pb is None:
-            return
         module_status = dict((state or {}).get("robotModuleStatus", {}))
-
-        msg = pb.RobotModuleStatus()
-        msg.power_manager = max(0, int(module_status.get("power_manager", 1)))
-        msg.rfid = max(0, int(module_status.get("rfid", 1)))
-        msg.light_strip = max(0, int(module_status.get("light_strip", 1)))
-        msg.small_shooter = max(0, int(module_status.get("small_shooter", 1)))
-        msg.big_shooter = max(0, int(module_status.get("big_shooter", 1)))
-        msg.uwb = max(0, int(module_status.get("uwb", 1)))
-        msg.armor = max(0, int(module_status.get("armor", 1)))
-        msg.video_transmission = max(
-            0, int(module_status.get("video_transmission", 1))
-        )
-        msg.capacitor = max(0, int(module_status.get("capacitor", 1)))
-        msg.main_controller = max(0, int(module_status.get("main_controller", 1)))
-        msg.laser_detection_module = max(
-            0, int(module_status.get("laser_detection_module", 1))
-        )
+        msg = base_pb.RobotModuleStatus()
+        for key in self.state_manager.MODULE_STATUS_FIELDS:
+            value = module_status.get(key)
+            if value is not None:
+                # Validate the final publishing boundary as well as console input.
+                value = self.state_manager._check_basic_uint(
+                    value, key, 1 if key == "modular_42mm" else 2
+                )
+                setattr(msg, key, value)
         self._publish("RobotModuleStatus", msg.SerializeToString())
 
     def publish_robot_module_status(self, state: Optional[dict] = None):

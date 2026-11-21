@@ -128,7 +128,7 @@ async def check_stale_red(window, set_health):
     await window.observe("last red picture marked stale", videoPreviewStatus="^画面已过期$")
     await set_health(322)
     await window.observe("new MQTT value during video loss", videoPreviewStatus="^画面已过期$",
-                         healthValue="^322$", connectionValue="^五类订阅就绪$")
+                         healthValue="^322$", connectionValue="^六类订阅就绪$")
     return await expect_pixels(window, "stale-red", [[RED] * 4])
 
 
@@ -336,7 +336,7 @@ async def verify(configuration, evidence, scenario):
                            "video": {"bindAddress": "127.0.0.1", "port": port}})
         async with open_window(config, title, configuration) as window:
             await set_health(321)
-            await window.observe("first live MQTT value while waiting for video", connectionValue="^五类订阅就绪$",
+            await window.observe("first live MQTT value while waiting for video", connectionValue="^六类订阅就绪$",
                                  videoPreviewStatus="^等待模拟画面$", healthValue="^321$")
             await window.action("diagnosticsTab")
             await window.observe("no picture delivered before the first video input",
@@ -386,7 +386,7 @@ async def verify(configuration, evidence, scenario):
                     await window.action("overviewTab")
                     await set_health(323)
                     await window.observe("third MQTT value during recovery", videoPreviewStatus="^正在播放$",
-                                         healthValue="^323$", connectionValue="^五类订阅就绪$")
+                                         healthValue="^323$", connectionValue="^六类订阅就绪$")
                     captures.append(await expect_pixels(window, "recovered-blue", [[BLUE] * 4]))
                 total_packets = pre_recovery_packets + restored.result()
                 assembled = assembled_before_restart + len(recovery)
@@ -410,7 +410,7 @@ async def verify(configuration, evidence, scenario):
     json_file(evidence / "broker-client-packets.json", client_packets)
     topics = [tuple(pair) for row in client_packets if row["kind"] == "subscribe" for pair in row["topics"]]
     require(sum(row["kind"] == "connect" for row in client_packets) == 1
-            and sorted(topics) == sorted((topic, 1) for topic in TOPICS), "Expected one five-topic Qt connection")
+            and sorted(topics) == sorted((topic, 1) for topic in TOPICS), "Expected one six-topic Qt connection")
     require(not any(row["kind"] == "client-publish" for row in client_packets), "Unexpected client business publish")
     wire_health = {RobotDynamicStatus.FromString(bytes.fromhex(row["hex"])).current_health
                    for row in client_packets if row["kind"] == "broker-publish" and row["topic"] == "RobotDynamicStatus"}

@@ -44,7 +44,7 @@ def assert_snapshot(snapshot, raw, title):
     require(local.utcoffset() is not None and utc.utcoffset().total_seconds() == 0
             and local == utc, "Sampling timestamps must represent the same instant with explicit zones")
     require(snapshot["semantics"]["rate_window_ms"] == 1000, "Missing local rate-window units")
-    require(set(snapshot["mqtt"]["topics"]) == TOPICS, "Snapshot should contain five exact MQTT topics")
+    require(set(snapshot["mqtt"]["topics"]) == TOPICS, "Snapshot should contain six exact MQTT topics")
     for forbidden in ("127.0.0.1", str(ROOT), str(ROOT).replace("\\", "/"), title, "infantry.json"):
         require(forbidden not in raw.decode("utf-8"), f"Snapshot exposed excluded configuration: {forbidden}")
     for group, field in RATE_FIELDS:
@@ -132,7 +132,7 @@ async def verify(configuration, evidence):
                            "video": {"bindAddress": "127.0.0.1", "port": port}})
         async with open_window(config, title, configuration) as window:
             await window.observe("bound-port failure with healthy MQTT connection",
-                                 connectionValue="^五类订阅就绪$", videoPreviewStatus="视频端口绑定失败")
+                                 connectionValue="^六类订阅就绪$", videoPreviewStatus="视频端口绑定失败")
             await window.action("diagnosticsTab")
             failed = await save_snapshot(window, evidence, title, "bind-failed")
             require(failed["udp"]["state"] == "bind_failed" and failed["udp"]["error_present"]
@@ -145,7 +145,7 @@ async def verify(configuration, evidence):
             await window.observe("stopped to release test conflict", connectionValue="^已停止$")
             blocker.close()
             await window.action("startButton")
-            await window.observe("waiting with no simulator data", connectionValue="^五类订阅就绪$",
+            await window.observe("waiting with no simulator data", connectionValue="^六类订阅就绪$",
                                  videoPreviewStatus="^等待模拟画面$")
             await window.action("diagnosticsTab")
             empty = await save_snapshot(window, evidence, title, "no-data")
@@ -158,7 +158,7 @@ async def verify(configuration, evidence):
             web_port, set_health = await services.enter_async_context(simulator_console(mqtt_port))
             await set_health(321)
             await window.action("overviewTab")
-            await window.observe("live five-topic MQTT path", connectionValue="^五类订阅就绪$", healthValue="^321$")
+            await window.observe("live six-topic MQTT path", connectionValue="^六类订阅就绪$", healthValue="^321$")
             # Three topics publish at 1 Hz; allow their first period after readiness.
             await asyncio.sleep(1.1)
             await window.action("diagnosticsTab")
@@ -201,7 +201,7 @@ async def verify(configuration, evidence):
                     await window.action("overviewTab")
                     await set_health(322 + index)
                     await window.observe(name + " stale while MQTT continues", videoPreviewStatus="^画面已过期$",
-                                         healthValue=f"^{322 + index}$", connectionValue="^五类订阅就绪$")
+                                         healthValue=f"^{322 + index}$", connectionValue="^六类订阅就绪$")
                     await window.action("diagnosticsTab")
                     quiet = await save_snapshot(window, evidence, title, name + "-quiet")
                     require(quiet["decode"]["state"] == "stale" and quiet["decode"]["frame_stale"]
@@ -224,7 +224,7 @@ async def verify(configuration, evidence):
                 await window.action("overviewTab")
                 await set_health(324)
                 await window.observe("receive remains responsive after write failure", healthValue="^324$",
-                                     connectionValue="^五类订阅就绪$")
+                                     connectionValue="^六类订阅就绪$")
             await window.action("diagnosticsTab")
             recovered = await save_snapshot(window, evidence, title, "write-recovered")
             require(recovered["mqtt"]["state"] == "connected", "Saving interrupted the MQTT session")
@@ -250,7 +250,7 @@ async def verify(configuration, evidence):
                 pass
             await window.action("overviewTab")
             await window.action("startButton")
-            await window.observe("new receive session starts without video", connectionValue="^五类订阅就绪$",
+            await window.observe("new receive session starts without video", connectionValue="^六类订阅就绪$",
                                  videoPreviewStatus="^等待模拟画面$")
             await window.action("diagnosticsTab")
             reopened = await save_snapshot(window, evidence, title, "reopened")
@@ -263,7 +263,7 @@ async def verify(configuration, evidence):
     topics = [tuple(pair) for row in client_packets if row["kind"] == "subscribe" for pair in row["topics"]]
     require(sum(row["kind"] == "connect" for row in client_packets) == 3
             and sorted(topics) == sorted([(topic, 1) for topic in TOPICS] * 3),
-            "Expected exactly three five-topic Qt connections at QoS 1")
+            "Expected exactly three six-topic Qt connections at QoS 1")
     require(not any(row["kind"] == "client-publish" for row in client_packets), "Unexpected client business publish")
     wire_health = {RobotDynamicStatus.FromString(bytes.fromhex(row["hex"])).current_health
                    for row in client_packets if row["kind"] == "broker-publish" and row["topic"] == "RobotDynamicStatus"}

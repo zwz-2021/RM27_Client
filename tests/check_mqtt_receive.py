@@ -29,7 +29,7 @@ from amqtt.plugins.base import BasePlugin
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 TOPICS = {"GameStatus", "GlobalUnitStatus", "GlobalLogisticsStatus",
-          "RobotStaticStatus", "RobotDynamicStatus"}
+          "RobotStaticStatus", "RobotDynamicStatus", "RobotModuleStatus"}
 TOTAL_ECONOMY = "18446744073709551615"
 INFANTRY_LABEL = "本地席位 · 步兵（只读）"
 UNSPECIFIED_LABEL = "本地席位 · 未指定（只读）"
@@ -264,7 +264,7 @@ def exercise_console(executable, evidence, base_url, port, cycles):
                     lambda s: s["subscriptionsReady"] and set(s["topics"]) == TOPICS
                     and s["receivedRobotId"] == robot_id and s["health"] == "321"
                     and s["totalEconomy"] == TOTAL_ECONOMY,
-                    f"five normal console topics visible in Qt ({team})")
+                    f"six normal console topics visible in Qt ({team})")
                 require(sample["qmlLoaded"], "Qt probe did not load production QML")
                 require(sample["qmlHealth"] == "321", "Actual QML HP label does not show 321")
                 require(TOTAL_ECONOMY in sample["ui"]["logistics"],
@@ -274,7 +274,7 @@ def exercise_console(executable, evidence, base_url, port, cycles):
                         "Qt lost signed game time or pause state")
                 require(sample["unitHealth"][1] == 321 and sample["unitBullets"][2] == -7,
                         "Qt global array mapping differs from wire")
-                checks.append(f"{team}: console -> broker -> Qt/QML HP 321 and all five topics")
+                checks.append(f"{team}: console -> broker -> Qt/QML HP 321 and all six topics")
                 require(sample["qmlSeat"] == (INFANTRY_LABEL if seat else UNSPECIFIED_LABEL)
                         and sample["actionAvailable"] == bool(seat),
                         "QML seat or action visibility differs from the explicit configuration")
@@ -282,7 +282,7 @@ def exercise_console(executable, evidence, base_url, port, cycles):
                     qt.blur_with_input()
                     command("set_basic_robot_values", robot_index=index, health=323)
                     qt.wait(lambda s: s["qmlHealth"] == "323" and s["peerFocused"] and set(s["topics"]) == TOPICS,
-                            "five-topic receiving continues while product window is unfocused")
+                            "six-topic receiving continues while product window is unfocused")
                     qt.perform("focus", lambda s: s["windowFocused"] and not s["peerFocused"],
                                "focus returns to product window")
                 else:
@@ -677,12 +677,13 @@ async def exercise_recovery(executable, evidence):
     async def publish(topic, wire_hex):
         await broker.internal_message_broadcast(topic, bytes.fromhex(wire_hex), qos=1)
 
-    async def publish_five(hp_hex):
+    async def publish_six(hp_hex):
         await publish("RobotStaticStatus", "20 03 28 03")
         await publish("GameStatus", "30 0a")
         await publish("GlobalUnitStatus", "5a 08 01 02 03 04 05 06 07 08 62 06 01 02 03 04 05 06")
         await publish("GlobalLogisticsStatus", "10 2a")
         await publish("RobotDynamicStatus", hp_hex)
+        await publish("RobotModuleStatus", "08 01 10 02 38 00")
 
     def next_attempt(qt, after_ms):
         return next((row for row in qt.samples if row["elapsedMs"] > after_ms
@@ -704,24 +705,24 @@ async def exercise_recovery(executable, evidence):
             and str(delay) + " 毫秒" in s["connectionDetail"] and "重连" in s.get("qmlConnection", "")
             and not s["subscriptionsReady"] and not s["topics"] and not s["staleTopics"]
             and s["receivedRobotId"] is None and s.get("qmlHealth") == "—",
-            f"clear all five topics and show {delay}ms retry", 15)
+            f"clear all six topics and show {delay}ms retry", 15)
 
     try:
         await start_broker("before-loss")
         with QtProbe(executable, evidence, "qt-recovery", port, seat="infantry") as qt:
-            await asyncio.to_thread(qt.wait, lambda s: s["subscriptionsReady"], "initial five SUBACKs")
-            await publish_five("08 c1 02")
+            await asyncio.to_thread(qt.wait, lambda s: s["subscriptionsReady"], "initial six SUBACKs")
+            await publish_six("08 c1 02")
             before = await asyncio.to_thread(qt.wait, lambda s: set(s["topics"]) == TOPICS and s["qmlHealth"] == "321",
-                                             "all five topics before AMQTT shutdown")
+                                             "all six topics before AMQTT shutdown")
             require(before["qmlSeat"] == INFANTRY_LABEL and before["actionAvailable"] and not before["qmlActionFeedback"],
                     "Infantry seat/action/initial feedback not rendered from configuration")
             await asyncio.to_thread(qt.perform, "click-action", lambda s: s["qmlActionFeedback"] == INFANTRY_FEEDBACK,
                                     "actual Qt button click explains infantry refusal")
             await asyncio.to_thread(qt.blur_with_input)
-            await publish_five("08 c3 02")
+            await publish_six("08 c3 02")
             await asyncio.to_thread(qt.wait, lambda s: s["peerFocused"] and s["qmlHealth"] == "323"
                                     and set(s["topics"]) == TOPICS and not s["staleTopics"],
-                                    "fresh five-topic receiving during loss of input focus")
+                                    "fresh six-topic receiving during loss of input focus")
             await asyncio.to_thread(qt.perform, "focus", lambda s: s["windowFocused"], "focus restored to product")
             await stop_broker()
             last = None
@@ -760,10 +761,10 @@ async def exercise_recovery(executable, evidence):
                                              "wrong robot ID ignored on recovered connection")
             require(sample["topics"] == ["GameStatus"] and "静态身份" in sample["error"],
                     "Recovered session accepted mismatching robot identity")
-            await publish_five("08 c2 02")
+            await publish_six("08 c2 02")
             await asyncio.to_thread(qt.wait, lambda s: set(s["topics"]) == TOPICS
                                     and s["receivedRobotId"] == 3 and s["qmlHealth"] == "322"
-                                    and not s["staleTopics"], "all five fresh topics after matching identity")
+                                    and not s["staleTopics"], "all six fresh topics after matching identity")
             require(all(s["health"] not in ("321", "444") and s["qmlHealth"] not in ("321", "444")
                         for s in qt.samples[first:]), "Old HP or unbound HP briefly appeared")
 
@@ -816,15 +817,15 @@ async def exercise_recovery(executable, evidence):
             require(sorted(acks) == sorted((row["id"], [1] * len(row["topics"])) for row in subs),
                     f"{phase}: subscriptions did not all receive the expected SUBACK")
             require({row["topic"] for row in rows if row["kind"] == "broker-publish"} == TOPICS,
-                    f"{phase}: broker capture missing one of the five topics")
+                    f"{phase}: broker capture missing one of the six topics")
             require(not any(row["kind"] == "client-publish" for row in rows),
                     f"{phase}: read-only client sent a business PUBLISH")
-        return [f"real AMQTT stop/restart: five resubscriptions in {recovery_ms} ms, "
-                "all five fresh after new identity, QML HP 321 -> 323 unfocused -> missing -> 322",
+        return [f"real AMQTT stop/restart: six resubscriptions in {recovery_ms} ms, "
+                "all six fresh after new identity, QML HP 321 -> 323 unfocused -> missing -> 322",
                 "one configured infantry Qt process: visible button/F6 refusal, key/mouse, focus transfer, stop and "
                 "reconnect with zero client PUBLISH; explicit infantry seat also refused for robot ID 1",
                 "bounded retries 500/1000/2000/4000/4000 ms; stop cancels, quit releases pending retry",
-                "one clean robot3 CONNECT per live broker, five QoS1 subscriptions and ACKs per connection, "
+                "one clean robot3 CONNECT per live broker, six QoS1 subscriptions and ACKs per connection, "
                 "zero client PUBLISH across recovery"]
     finally:
         await stop_broker()
@@ -897,11 +898,11 @@ async def run(args, evidence):
         require({row["topic"] for row in packets if row["kind"] == "broker-publish"} == TOPICS
                 and any(row["kind"] == "client-puback" for row in packets)
                 and not any(row["kind"] == "client-publish" for row in packets),
-                f"Client {client_id}: expected five-topic receiving, PUBACK and zero business PUBLISH")
+                f"Client {client_id}: expected six-topic receiving, PUBACK and zero business PUBLISH")
     require(TOPICS.issubset({row["topic"] for row in broker_packets if row["kind"] == "client-publish"
                              and row["clientId"] == f"rm27_simulator_{os.getpid()}"}),
             "Broker capture did not distinguish actual simulator publications from Qt connections")
-    checks.append("simulator published all five topics; client IDs 3/103 received and acknowledged, "
+    checks.append("simulator published all six topics; client IDs 3/103 received and acknowledged, "
                   "both sent zero business PUBLISH; blue infantry HP remained live while unfocused")
     runtime = application.fastapi_app.state.simulator
     for component in (runtime.state_manager, runtime.mqtt_publisher,
@@ -930,12 +931,12 @@ async def run(args, evidence):
                     "Repeated connection loss did not create exactly one automatic replacement")
         if mode == "abandoned":
             require(fixture.accept_count == 2, "Expected exactly two connection attempts")
-            for attempt, confirmed in ((1, 4), (2, 5)):
+            for attempt, confirmed in ((1, len(TOPICS) - 1), (2, len(TOPICS))):
                 rows = [row for row in fixture.observed if row["attempt"] == attempt]
                 require([r["clientId"] for r in rows if r["kind"] == "connect"] == ["3"],
                         f"Attempt {attempt}: expected one robot 3 CONNECT")
                 require(sorted(r["topic"] for r in rows if r["kind"] == "subscribe") == sorted(TOPICS),
-                        f"Attempt {attempt}: expected five exact subscriptions")
+                        f"Attempt {attempt}: expected six exact subscriptions")
                 require([code for r in rows if r["kind"] == "suback" for code in r["codes"]] == [1] * confirmed,
                         f"Attempt {attempt}: expected {confirmed} QoS1 acknowledgments")
             require(sorted(row["packetId"] for row in fixture.observed if row["kind"] == "old-puback") == [1, 2],
@@ -943,7 +944,7 @@ async def run(args, evidence):
         if mode != "timeout":
             subscriptions = [x for x in fixture.observed if x["kind"] == "subscribe"]
             require({x["topic"] for x in subscriptions} == TOPICS,
-                    "Client subscriptions were not exactly the five supported topics")
+                    "Client subscriptions were not exactly the six supported topics")
             require(all(x["qos"] <= 1 for x in subscriptions), "Subscription exceeded QoS 1")
         checks.append(f"wire fixture: {mode}")
     # Reserve a bound but non-listening port, avoiding races with another service.

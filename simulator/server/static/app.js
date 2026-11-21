@@ -274,32 +274,24 @@ if (!hasSocketIo || !hasVue) {
         },
         robotDynamicStatusDirty: false,
         isSyncingRobotDynamicStatusForm: false,
-        robotModuleStatus: {
-            power_manager: 1,
-            rfid: 1,
-            light_strip: 1,
-            small_shooter: 1,
-            big_shooter: 1,
-            uwb: 1,
-            armor: 1,
-            video_transmission: 1,
-            capacitor: 1,
-            main_controller: 1,
-            laser_detection_module: 1
-        },
-        robotModuleStatusForm: {
-            power_manager: 1,
-            rfid: 1,
-            light_strip: 1,
-            small_shooter: 1,
-            big_shooter: 1,
-            uwb: 1,
-            armor: 1,
-            video_transmission: 1,
-            capacitor: 1,
-            main_controller: 1,
-            laser_detection_module: 1
-        },
+        robotModuleStatus: {},
+        robotModuleStatusForm: {},
+        robotModuleFields: [
+            { key: 'power_manager', label: '电源管理', roles: [1, 3, 4, 5, 6, 7, 8, 9] },
+            { key: 'rfid', label: 'RFID / 场地交互', roles: [1, 3, 4, 5, 7] },
+            { key: 'light_strip', label: '灯条', roles: [1, 3, 4, 5, 7] },
+            { key: 'small_shooter', label: '17mm 测速', roles: [3, 4, 5, 7] },
+            { key: 'big_shooter', label: '42mm 测速', roles: [1] },
+            { key: 'uwb', label: '定位', roles: [1, 3, 4, 5, 7] },
+            { key: 'armor', label: '装甲（协议单项）', roles: [1, 3, 4, 5, 7] },
+            { key: 'video_transmission', label: '图传', roles: [1, 3, 4, 5, 6, 7] },
+            { key: 'capacitor', label: '电容', roles: [1, 3, 4, 5, 7] },
+            { key: 'main_controller', label: '主控', roles: [1, 3, 4, 5, 6, 7, 8, 9] },
+            { key: 'modular_42mm', label: '42mm 模块安装权限', roles: [1] }
+        ],
+        robotModulePublishing: true,
+        robotModuleFeedback: '',
+        robotModuleBusy: false,
         robotModuleStatusDirty: false,
         isSyncingRobotModuleStatusForm: false,
         sentryStatusSync: {
@@ -593,6 +585,7 @@ if (!hasSocketIo || !hasVue) {
 
         socket.on('disconnect', () => {
             this.connected = false;
+            this.robotModuleFeedback = '与模拟器断开，模块修改暂不可保存';
             this.simulationUiMessage = '与仿真服务的连接已断开，赛事控制暂不可用';
         });
 
@@ -605,6 +598,8 @@ if (!hasSocketIo || !hasVue) {
                     // robot's drafts only when the server confirms the switch.
                     this.robotStaticStatusDirty = false;
                     this.robotDynamicStatusDirty = false;
+                    this.robotModuleStatusDirty = false;
+                    this.robotModuleFeedback = '';
                     this.statusRobotId = incomingRobotId;
                 }
                 this.currentRobotId = incomingRobotId;
@@ -706,6 +701,7 @@ if (!hasSocketIo || !hasVue) {
                 this.syncRobotDynamicStatusFormFromState(this.robotDynamicStatus);
             }
             this.robotModuleStatus = data.robotModuleStatus || this.robotModuleStatus;
+            this.robotModulePublishing = data.robotModulePublishing !== false;
             if (this.robotModuleStatusDirty) {
                 if (this.isRobotModuleStatusFormEqual(this.robotModuleStatus)) {
                     this.robotModuleStatusDirty = false;
@@ -1424,19 +1420,8 @@ if (!hasSocketIo || !hasVue) {
         },
         syncRobotModuleStatusFormFromState(state = {}) {
             this.isSyncingRobotModuleStatusForm = true;
-            this.robotModuleStatusForm = Object.assign({}, this.robotModuleStatusForm, {
-                power_manager: Number(state.power_manager ?? 1),
-                rfid: Number(state.rfid ?? 1),
-                light_strip: Number(state.light_strip ?? 1),
-                small_shooter: Number(state.small_shooter ?? 1),
-                big_shooter: Number(state.big_shooter ?? 1),
-                uwb: Number(state.uwb ?? 1),
-                armor: Number(state.armor ?? 1),
-                video_transmission: Number(state.video_transmission ?? 1),
-                capacitor: Number(state.capacitor ?? 1),
-                main_controller: Number(state.main_controller ?? 1),
-                laser_detection_module: Number(state.laser_detection_module ?? 1)
-            });
+            this.robotModuleStatusForm = Object.fromEntries(this.robotModuleFields.map(field =>
+                [field.key, state[field.key] == null ? '' : String(state[field.key])]));
             // Vue's deep watcher runs on the next tick. Keep the guard set
             // until that watcher has observed this programmatic synchronization.
             this.$nextTick(() => { this.isSyncingRobotModuleStatusForm = false; });
@@ -1473,17 +1458,11 @@ if (!hasSocketIo || !hasVue) {
                 && Number(state.can_remote_ammo ? 1 : 0) === Number(this.robotDynamicStatusForm.can_remote_ammo);
         },
         isRobotModuleStatusFormEqual(state = {}) {
-            return Number(state.power_manager ?? 1) === Number(this.robotModuleStatusForm.power_manager)
-                && Number(state.rfid ?? 1) === Number(this.robotModuleStatusForm.rfid)
-                && Number(state.light_strip ?? 1) === Number(this.robotModuleStatusForm.light_strip)
-                && Number(state.small_shooter ?? 1) === Number(this.robotModuleStatusForm.small_shooter)
-                && Number(state.big_shooter ?? 1) === Number(this.robotModuleStatusForm.big_shooter)
-                && Number(state.uwb ?? 1) === Number(this.robotModuleStatusForm.uwb)
-                && Number(state.armor ?? 1) === Number(this.robotModuleStatusForm.armor)
-                && Number(state.video_transmission ?? 1) === Number(this.robotModuleStatusForm.video_transmission)
-                && Number(state.capacitor ?? 1) === Number(this.robotModuleStatusForm.capacitor)
-                && Number(state.main_controller ?? 1) === Number(this.robotModuleStatusForm.main_controller)
-                && Number(state.laser_detection_module ?? 1) === Number(this.robotModuleStatusForm.laser_detection_module);
+            return this.robotModuleFields.every(field =>
+                (state[field.key] == null ? '' : String(state[field.key])) === this.robotModuleStatusForm[field.key]);
+        },
+        isRobotModuleApplicable(field) {
+            return field.roles.includes(Number(this.statusRobotId) % 100);
         },
         normalizeRobotInjuryForm() {
             if (this.isNormalizingRobotInjuryForm) {
@@ -1855,19 +1834,32 @@ if (!hasSocketIo || !hasVue) {
             });
         },
         sendRobotModuleStatus() {
-            this.robotModuleStatusDirty = true;
-            this.sendCommand('send_robot_module_status', {
-                power_manager: this.toNonNegativeInt(this.robotModuleStatusForm.power_manager),
-                rfid: this.toNonNegativeInt(this.robotModuleStatusForm.rfid),
-                light_strip: this.toNonNegativeInt(this.robotModuleStatusForm.light_strip),
-                small_shooter: this.toNonNegativeInt(this.robotModuleStatusForm.small_shooter),
-                big_shooter: this.toNonNegativeInt(this.robotModuleStatusForm.big_shooter),
-                uwb: this.toNonNegativeInt(this.robotModuleStatusForm.uwb),
-                armor: this.toNonNegativeInt(this.robotModuleStatusForm.armor),
-                video_transmission: this.toNonNegativeInt(this.robotModuleStatusForm.video_transmission),
-                capacitor: this.toNonNegativeInt(this.robotModuleStatusForm.capacitor),
-                main_controller: this.toNonNegativeInt(this.robotModuleStatusForm.main_controller),
-                laser_detection_module: this.toNonNegativeInt(this.robotModuleStatusForm.laser_detection_module)
+            const payload = Object.fromEntries(this.robotModuleFields.map(field => {
+                const value = this.robotModuleStatusForm[field.key];
+                return [field.key, value == null || value === '' ? null : Number(value)];
+            }));
+            this.sendModuleCommand('send_robot_module_status', { ...payload, expected_robot_id: this.statusRobotId });
+        },
+        setRobotModulePublishing(enabled) {
+            this.sendModuleCommand('set_robot_module_publishing', { enabled });
+        },
+        sendModuleCommand(command, payload) {
+            if (!this.connected || this.robotModuleBusy) {
+                this.robotModuleFeedback = this.connected ? '正在保存，请稍候' : '与模拟器断开，模块修改暂不可保存';
+                return;
+            }
+            this.robotModuleBusy = true;
+            this.robotModuleFeedback = '正在保存…';
+            const robotId = this.statusRobotId;
+            socket.timeout(5000).emit('referee_command', { command, ...payload }, (error, reply) => {
+                this.robotModuleBusy = false;
+                if (robotId !== this.statusRobotId) return;
+                if (error || !reply || reply.ok !== true) {
+                    this.robotModuleFeedback = error ? '保存超时，请检查连接后重试' : (reply && reply.error) || '保存失败';
+                    return;
+                }
+                const publishing = command === 'set_robot_module_publishing' ? payload.enabled : this.robotModulePublishing;
+                this.robotModuleFeedback = publishing ? '已保存；按 1 Hz 周期发布，客户端应在下一周期更新' : '已保存；模块周期发布已暂停，其他消息继续';
             });
         },
         sendRobotPerformanceSelection() {

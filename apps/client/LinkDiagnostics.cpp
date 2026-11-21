@@ -111,7 +111,8 @@ QJsonObject captureLinkDiagnostics(const application::ClientSession &session,
         {"GlobalUnitStatus", sampleState(samples.units)},
         {"GlobalLogisticsStatus", sampleState(samples.logistics)},
         {"RobotStaticStatus", sampleState(samples.robotStatic)},
-        {"RobotDynamicStatus", sampleState(samples.robotDynamic)}
+        {"RobotDynamicStatus", sampleState(samples.robotDynamic)},
+        {"RobotModuleStatus", sampleState(samples.robotModule)}
     };
     const QJsonObject header = udp.lastHeader ? QJsonObject{
         {"frame_id", udp.lastHeader->frameId}, {"fragment_index", udp.lastHeader->fragmentIndex},

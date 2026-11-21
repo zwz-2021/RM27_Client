@@ -25,6 +25,11 @@ $closed = Invoke-ProductWindow $ConfigFile $WindowTitle $Configuration $director
                                    'videoPresentationRateLabel', 'videoPreviewStatus')) {
                     if ($controls.ContainsKey($id)) { $view[$id] = $controls[$id].Current.Name }
                 }
+                foreach ($id in $controls.Keys) {
+                    if ($id -like 'module_*' -or $id -in @('moduleStatus', 'moduleSummary', 'diagnosticLabel')) {
+                        $view[$id] = $controls[$id].Current.Name
+                    }
+                }
                 if ($controls.ContainsKey('snapshotSaveFeedback')) {
                     $feedback = $controls['snapshotSaveFeedback']
                     $pattern = $null

@@ -84,7 +84,7 @@ async def verify(path, configuration, evidence, report):
                            "mqtt": {"host": "127.0.0.1", "port": mqtt_port, "robotId": 3},
                            "video": {"bindAddress": "127.0.0.1", "port": port}})
         async with open_window(config, title, configuration, trace_video=True) as window:
-            await window.observe("session ready", connectionValue="^五类订阅就绪$", videoPreviewStatus="^等待模拟画面$")
+            await window.observe("session ready", connectionValue="^六类订阅就绪$", videoPreviewStatus="^等待模拟画面$")
             waiting = await window.action("capturePreview")
             streamer = VideoStreamer("127.0.0.1", port)
             trace = MeasuredSocket(streamer.sock)

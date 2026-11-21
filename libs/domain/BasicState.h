@@ -17,6 +17,7 @@ struct BasicState {
     BasicSample<LogisticsData> logistics;
     BasicSample<RobotStaticData> robotStatic;
     BasicSample<RobotDynamicData> robotDynamic;
+    BasicSample<RobotModuleData> robotModule;
 };
 
 } // namespace rm27::domain

@@ -9,7 +9,7 @@
     <script src="/vendor/socket.io.min.js" defer></script>
     <script src="/vendor/vue.min.js" defer></script>
     <script src="/map_geometry.js?v=20260809_01" defer></script>
-    <script src="/app.js?v=20261101_type" defer></script>
+    <script src="/app.js?v=20261121_module" defer></script>
 </head>
 
 <body>
@@ -44,7 +44,7 @@
             <section class="panel basic-fixture" id="basicData">
                 <h2>第 1 步：2027 基础数据准备</h2>
                 <p v-if="baseInputError" role="alert" class="base-input-error">{{ baseInputError }}</p>
-                <p>比赛阶段与秒数、机器人编号、血量、热量、允许发弹量和经济通过五类基础 MQTT 消息发布。客户端使用 simulation 模式接收，机器人编号须与顶部选择一致。这里的值是手工测试场景，不是官方设备数据。</p>
+                <p>比赛阶段与秒数、机器人编号、血量、热量、允许发弹量、经济和模块状态通过六类 MQTT 消息发布。客户端使用 simulation 模式接收，机器人编号须与顶部选择一致。这里的值是手工测试场景，不是官方设备数据。</p>
                 <p class="hint">全局血量报文按己方 1/3/4/7、对方 1/3/4/7 排列；5/6 号的血量可在其自身动态状态中发送。全局发弹量按 P-002 的己方 1/2（保留为 0）/3/4/6/7 六项排列。</p>
                 <div class="score-control-grid">
                     <div class="score-control-card">
@@ -71,7 +71,7 @@
             <!-- 机器人状态控制 -->
             <section class="panel score-economy">
                 <h3>2027 当前机器人基础状态</h3>
-                <p class="hint">本次更新静态与动态状态。血量、热量与全队输入共用状态；全局 int32 累计发弹量与这里 uint32 剩余允许发弹量分别设置，不表示实弹库存。模块状态仍属旧版工具。</p>
+                <p class="hint">静态、动态及模块状态已按 2027 协议更新。血量、热量与全队输入共用状态；全局 int32 累计发弹量与这里 uint32 剩余允许发弹量分别设置，不表示实弹库存。模块状态保存后按 1 Hz 周期发布。</p>
                 <div class="score-control-grid robot-status-grid">
                     <div class="score-control-card robot-status-card">
                         <h4>RobotStaticStatus</h4>
@@ -109,20 +109,22 @@
                         <div class="control-line"><label>是否可以远程补弹</label><select v-model.number="robotDynamicStatusForm.can_remote_ammo"><option :value="0">0</option><option :value="1">1</option></select></div>
                         <div class="actions"><button @click="sendRobotDynamicStatus">发送动态状态</button></div>
                     </div>
-                    <div class="score-control-card robot-status-card">
-                        <h4>RobotModuleStatus（旧版工具，尚未迁移）</h4>
-                        <div class="control-line"><label>电源管理</label><input type="number" v-model.number="robotModuleStatusForm.power_manager" min="0"></div>
-                        <div class="control-line"><label>rfid</label><input type="number" v-model.number="robotModuleStatusForm.rfid" min="0"></div>
-                        <div class="control-line"><label>灯条</label><input type="number" v-model.number="robotModuleStatusForm.light_strip" min="0"></div>
-                        <div class="control-line"><label>17mm 发射机构</label><input type="number" v-model.number="robotModuleStatusForm.small_shooter" min="0"></div>
-                        <div class="control-line"><label>42mm 发射机构</label><input type="number" v-model.number="robotModuleStatusForm.big_shooter" min="0"></div>
-                        <div class="control-line"><label>定位模块</label><input type="number" v-model.number="robotModuleStatusForm.uwb" min="0"></div>
-                        <div class="control-line"><label>装甲</label><input type="number" v-model.number="robotModuleStatusForm.armor" min="0"></div>
-                        <div class="control-line"><label>图传</label><input type="number" v-model.number="robotModuleStatusForm.video_transmission" min="0"></div>
-                        <div class="control-line"><label>电容</label><input type="number" v-model.number="robotModuleStatusForm.capacitor" min="0"></div>
-                        <div class="control-line"><label>主控</label><input type="number" v-model.number="robotModuleStatusForm.main_controller" min="0"></div>
-                        <div class="control-line"><label>激光检测</label><input type="number" v-model.number="robotModuleStatusForm.laser_detection_module" min="0"></div>
-                        <div class="actions"><button @click="sendRobotModuleStatus">发送模块状态</button></div>
+                    <div id="robot-module-status" class="score-control-card robot-status-card">
+                        <h4>RobotModuleStatus</h4>
+                        <p class="hint">0 离线 / 1 在线 / 2 安装不规范（视为离线）。未提供会省略该字段，不等于在线。装甲只有一个协议状态，不能推断四块装甲各自状态。42mm 安装权限仅适用于重装。</p>
+                        <div class="control-line" v-for="field in robotModuleFields" :key="field.key">
+                            <label :for="'module-' + field.key">{{ field.label }}</label>
+                            <select :id="'module-' + field.key" v-model="robotModuleStatusForm[field.key]" :disabled="!isRobotModuleApplicable(field) || robotModuleBusy">
+                                <option value="">未提供</option>
+                                <option value="0">{{ field.key === 'modular_42mm' ? '0 无权限' : '0 离线' }}</option>
+                                <option value="1">{{ field.key === 'modular_42mm' ? '1 有权限' : '1 在线' }}</option>
+                                <option v-if="field.key !== 'modular_42mm'" value="2">2 安装不规范</option>
+                            </select>
+                            <span v-if="!isRobotModuleApplicable(field)">本角色不适用</span>
+                        </div>
+                        <div class="control-line"><label for="module-publishing">模块周期发布（1 Hz）</label><input id="module-publishing" type="checkbox" :checked="robotModulePublishing" :disabled="!connected || robotModuleBusy" @change="setRobotModulePublishing($event.target.checked)"></div>
+                        <div class="actions"><button id="module-save" @click="sendRobotModuleStatus" :disabled="!connected || robotModuleBusy">保存模块状态</button></div>
+                        <p id="module-feedback" role="status" class="hint">{{ robotModuleFeedback }}</p>
                     </div>
                 </div>
             </section>

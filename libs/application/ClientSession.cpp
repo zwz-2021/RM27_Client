@@ -164,6 +164,7 @@ void ClientSession::acceptBasicMessage(const domain::BasicMessage &message, qint
                 basicState_.units = {};
                 basicState_.logistics = {};
                 basicState_.robotDynamic = {};
+                basicState_.robotModule = {};
                 basicState_.robotStatic = {};
                 setDiagnostic(QStringLiteral("静态身份未提供或不匹配：配置机器人 %1，收到 %2；等待身份一致的数据。")
                     .arg(robotId_).arg(data.robot_id ? QString::number(*data.robot_id) : QStringLiteral("未提供")));
@@ -175,6 +176,7 @@ void ClientSession::acceptBasicMessage(const domain::BasicMessage &message, qint
             if constexpr (std::is_same_v<T, domain::GlobalUnitData>) save(basicState_.units);
             if constexpr (std::is_same_v<T, domain::LogisticsData>) save(basicState_.logistics);
             if constexpr (std::is_same_v<T, domain::RobotDynamicData>) save(basicState_.robotDynamic);
+            if constexpr (std::is_same_v<T, domain::RobotModuleData>) save(basicState_.robotModule);
         }
     }, message);
     emit basicStateChanged();
@@ -195,6 +197,7 @@ void ClientSession::refreshFreshness()
     refresh(basicState_.logistics, 3000);
     refresh(basicState_.robotStatic, 3000);
     refresh(basicState_.robotDynamic, 1000);
+    refresh(basicState_.robotModule, 3000);
     if (changed) emit basicStateChanged();
 }
 

@@ -101,6 +101,19 @@ QJsonObject toJson(const domain::BasicMessage &message)
             if (value.can_remote_heal) result.insert(QStringLiteral("can_remote_heal"), *value.can_remote_heal);
             if (value.can_remote_ammo) result.insert(QStringLiteral("can_remote_ammo"), *value.can_remote_ammo);
         }
+        if constexpr (std::is_same_v<T, domain::RobotModuleData>) {
+            if (value.power_manager) result.insert(QStringLiteral("power_manager"), static_cast<double>(*value.power_manager));
+            if (value.rfid) result.insert(QStringLiteral("rfid"), static_cast<double>(*value.rfid));
+            if (value.light_strip) result.insert(QStringLiteral("light_strip"), static_cast<double>(*value.light_strip));
+            if (value.small_shooter) result.insert(QStringLiteral("small_shooter"), static_cast<double>(*value.small_shooter));
+            if (value.big_shooter) result.insert(QStringLiteral("big_shooter"), static_cast<double>(*value.big_shooter));
+            if (value.uwb) result.insert(QStringLiteral("uwb"), static_cast<double>(*value.uwb));
+            if (value.armor) result.insert(QStringLiteral("armor"), static_cast<double>(*value.armor));
+            if (value.video_transmission) result.insert(QStringLiteral("video_transmission"), static_cast<double>(*value.video_transmission));
+            if (value.capacitor) result.insert(QStringLiteral("capacitor"), static_cast<double>(*value.capacitor));
+            if (value.main_controller) result.insert(QStringLiteral("main_controller"), static_cast<double>(*value.main_controller));
+            if (value.modular_42mm) result.insert(QStringLiteral("modular_42mm"), static_cast<double>(*value.modular_42mm));
+        }
         return result;
     }, message);
 }
@@ -142,7 +155,7 @@ void selfTest()
     check(logistics.remaining_economy == 0 && logistics.total_economy_obtained == std::numeric_limits<std::uint64_t>::max(),
           "zero economy presence and full uint64 precision");
 
-    for (auto topic : {"GameStatus", "GlobalUnitStatus", "GlobalLogisticsStatus", "RobotStaticStatus", "RobotDynamicStatus"}) {
+    for (auto topic : {"GameStatus", "GlobalUnitStatus", "GlobalLogisticsStatus", "RobotStaticStatus", "RobotDynamicStatus", "RobotModuleStatus"}) {
         const auto empty = protocol::decode(QString::fromLatin1(topic), {});
         check(empty.message.has_value(), "empty protobuf is valid but unknown");
         const auto encoded = protocol::encode(*empty.message);
@@ -157,6 +170,34 @@ void selfTest()
     check(!protocol::decode(QStringLiteral("RobotDynamicStatus"), QByteArray::fromHex("150000c07f")).message, "reject NaN heat");
     const auto future = decoded<domain::GameData>("GameStatus", "288407980607");
     check(future.current_stage == 900, "preserve unknown stage, accept unknown protobuf fields");
+
+    const auto module = decoded<domain::RobotModuleData>("RobotModuleStatus", "08001001180220002801300238004001480250005801");
+    check(module.power_manager == 0 && module.rfid == 1 && module.light_strip == 2
+          && module.small_shooter == 0 && module.big_shooter == 1 && module.uwb == 2
+          && module.armor == 0 && module.video_transmission == 1 && module.capacitor == 2
+          && module.main_controller == 0 && module.modular_42mm == 1, "eleven module field numbers and independent values");
+    const auto moduleEncoded = protocol::encode(module);
+    check(moduleEncoded.error.isEmpty() && moduleEncoded.payload.toHex() == "08001001180220002801300238004001480250005801",
+          "module fixed bytes roundtrip");
+    const auto moduleZero = decoded<domain::RobotModuleData>("RobotModuleStatus", "5800");
+    check(moduleZero.modular_42mm == 0 && !moduleZero.armor && !moduleZero.power_manager,
+          "permission zero present and missing modules stay missing");
+    for (int field = 1; field <= 11; ++field) {
+        QByteArray invalid;
+        invalid.append(static_cast<char>(field << 3));
+        invalid.append(static_cast<char>(field == 11 ? 2 : 3));
+        check(!protocol::decode(QStringLiteral("RobotModuleStatus"), invalid).message,
+              "module invalid enum must reject the entire sample");
+    }
+    auto invalidPermission = module;
+    invalidPermission.modular_42mm = 2;
+    check(!protocol::encode(invalidPermission).error.isEmpty(), "encoder rejects permission 2");
+    check(!protocol::decode(QStringLiteral("RobotModuleStatus"), QByteArray::fromHex("5880")).message,
+          "module truncated varint rejected");
+    const auto moduleFuture = decoded<domain::RobotModuleData>("RobotModuleStatus", "3801980601");
+    check(moduleFuture.armor == 1, "unknown protobuf fields do not create extra armor states");
+    check(protocol::contractFor(QStringLiteral("RobotModuleStatus"))->frequencyHz == 1,
+          "module frequency is 1 Hz");
 
     domain::GameData signedTime;
     signedTime.stage_countdown_sec = -1;

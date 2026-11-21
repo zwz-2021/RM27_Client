@@ -64,7 +64,7 @@ void checkCapture()
         && child(snapshot, "udp").value("last_valid_packet_age_ms").isNull()
         && child(snapshot, "assembly").value("completed_frames_last_second").isNull(), "stopped or missing data look measured");
     const auto missing = child(child(snapshot, "mqtt"), "topics");
-    require(missing.size() == 5, "MQTT topic set");
+    require(missing.size() == 6, "MQTT topic set");
     for (auto it = missing.begin(); it != missing.end(); ++it)
         require(!it.value().toObject().value("received").toBool() && it.value().toObject().value("stale").isNull(), "missing MQTT sample");
     require(child(snapshot, "decode").value("state") == "not_available"
@@ -86,6 +86,7 @@ void checkCapture()
     domain::RobotDynamicData dynamic;
     dynamic.current_health = 987654321;
     source.basicMessageReceived(dynamic, 1000);
+    source.basicMessageReceived(domain::RobotModuleData{}, 3000);
     source.basicMessageReceived(domain::GameData{}, 0);
     source.diagnosticReceived("do-not-export-raw-diagnostic");
     udp.validPackets = std::numeric_limits<quint64>::max();
@@ -117,6 +118,8 @@ void checkCapture()
     require(mqtt.value("state") == "connected" && mqtt.value("diagnostic_present").toBool()
         && child(topics, "RobotDynamicStatus").value("received").toBool()
         && child(topics, "RobotDynamicStatus").value("stale").toBool()
+        && child(topics, "RobotModuleStatus").value("received").toBool()
+        && child(topics, "RobotModuleStatus").value("stale").toBool()
         && !child(topics, "GameStatus").value("stale").toBool(), "MQTT accepted/stale state lost");
     const auto wire = child(snapshot, "udp");
     require(wire.value("valid_packets_total") == "18446744073709551615"

@@ -109,6 +109,7 @@ int main(int argc, char **argv)
         topic("GameStatus", s.game); topic("GlobalUnitStatus", s.units);
         topic("GlobalLogisticsStatus", s.logistics); topic("RobotStaticStatus", s.robotStatic);
         topic("RobotDynamicStatus", s.robotDynamic);
+        topic("RobotModuleStatus", s.robotModule);
         QJsonObject row{{"commandSeq", commandSeq}, {"running", session.active()},
             {"connected", session.connectionState() == domain::ConnectionState::Connected
                 || session.connectionState() == domain::ConnectionState::Subscribing},

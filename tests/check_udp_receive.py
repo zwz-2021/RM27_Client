@@ -38,7 +38,9 @@ class Window:
         start = time.monotonic()
         while True:
             view = await self.action("snapshot")
-            if all(re.search(pattern, view.get(key, "")) for key, pattern in patterns.items()):
+            # Qt may rebuild a delegate between UI Automation enumeration and
+            # reading its Name. A transient null is not an observed value.
+            if all(re.search(pattern, view.get(key) or "") for key, pattern in patterns.items()):
                 with (self.evidence / "window.jsonl").open("a", encoding="utf-8") as log:
                     log.write(json.dumps({"observation": description, **view}, ensure_ascii=False) + "\n")
                 return view
@@ -184,7 +186,7 @@ async def verify(configuration, evidence):
         }, indent=2), encoding="utf-8")
 
         async with open_window(config, title, configuration) as window:
-            await window.observe("MQTT ready with UDP port occupied", connectionValue="^五类订阅就绪$",
+            await window.observe("MQTT ready with UDP port occupied", connectionValue="^六类订阅就绪$",
                                  seatLabel="步兵（只读）", videoPreviewStatus="视频端口绑定失败")
             await broker.internal_message_broadcast("RobotStaticStatus", bytes.fromhex("20 03 28 03"), qos=1)
             await window.observe("fresh robot identity with UDP port occupied", identityValue=r"\b3\b")
@@ -201,7 +203,7 @@ async def verify(configuration, evidence):
             await window.observe("first stop", connectionValue="^已停止$")
             blocker.close()
             await window.action("startButton")
-            await window.observe("MQTT ready after manual restart", connectionValue="^五类订阅就绪$",
+            await window.observe("MQTT ready after manual restart", connectionValue="^六类订阅就绪$",
                                  videoPreviewStatus="^等待模拟画面$")
             await window.action("diagnosticsTab")
             await window.observe("UDP bound with fresh counters", udpBindingLabel=rf"已绑定 127\.0\.0\.1:{port}\b",
@@ -278,7 +280,7 @@ async def verify(configuration, evidence):
         require(probe.connect_ex(("127.0.0.1", mqtt_port)) != 0, "Test broker still listening")
     (evidence / "broker-packets.json").write_text(json.dumps(packets, indent=2), encoding="utf-8")
     topics = [tuple(pair) for row in packets if row["kind"] == "subscribe" for pair in row["topics"]]
-    require(sorted(topics) == sorted([(topic, 1) for topic in TOPICS] * 2), "Expected two five-topic MQTT sessions")
+    require(sorted(topics) == sorted([(topic, 1) for topic in TOPICS] * 2), "Expected two six-topic MQTT sessions")
     require(not any(row["kind"] == "client-publish" for row in packets), "Unexpected client business publish")
     log_file, = evidence.glob("client-*.jsonl")
     records = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines()]

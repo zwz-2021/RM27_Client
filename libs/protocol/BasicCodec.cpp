@@ -7,10 +7,10 @@
 
 namespace rm27::protocol {
 namespace {
-constexpr std::array<TopicContract, 5> contracts{{
+constexpr std::array<TopicContract, 6> contracts{{
     {"GameStatus", 5, 1}, {"GlobalUnitStatus", 1, 1},
     {"GlobalLogisticsStatus", 1, 1}, {"RobotStaticStatus", 1, 1},
-    {"RobotDynamicStatus", 10, 1}
+    {"RobotDynamicStatus", 10, 1}, {"RobotModuleStatus", 1, 1}
 }};
 
 domain::GameData fromWire(const wire::GameStatus &source)
@@ -187,6 +187,40 @@ wire::RobotDynamicStatus toWire(const domain::RobotDynamicData &source)
     return result;
 }
 
+domain::RobotModuleData fromWire(const wire::RobotModuleStatus &source)
+{
+    domain::RobotModuleData result;
+    if (source.has_power_manager()) result.power_manager = source.power_manager();
+    if (source.has_rfid()) result.rfid = source.rfid();
+    if (source.has_light_strip()) result.light_strip = source.light_strip();
+    if (source.has_small_shooter()) result.small_shooter = source.small_shooter();
+    if (source.has_big_shooter()) result.big_shooter = source.big_shooter();
+    if (source.has_uwb()) result.uwb = source.uwb();
+    if (source.has_armor()) result.armor = source.armor();
+    if (source.has_video_transmission()) result.video_transmission = source.video_transmission();
+    if (source.has_capacitor()) result.capacitor = source.capacitor();
+    if (source.has_main_controller()) result.main_controller = source.main_controller();
+    if (source.has_modular_42mm()) result.modular_42mm = source.modular_42mm();
+    return result;
+}
+
+wire::RobotModuleStatus toWire(const domain::RobotModuleData &source)
+{
+    wire::RobotModuleStatus result;
+    if (source.power_manager) result.set_power_manager(*source.power_manager);
+    if (source.rfid) result.set_rfid(*source.rfid);
+    if (source.light_strip) result.set_light_strip(*source.light_strip);
+    if (source.small_shooter) result.set_small_shooter(*source.small_shooter);
+    if (source.big_shooter) result.set_big_shooter(*source.big_shooter);
+    if (source.uwb) result.set_uwb(*source.uwb);
+    if (source.armor) result.set_armor(*source.armor);
+    if (source.video_transmission) result.set_video_transmission(*source.video_transmission);
+    if (source.capacitor) result.set_capacitor(*source.capacitor);
+    if (source.main_controller) result.set_main_controller(*source.main_controller);
+    if (source.modular_42mm) result.set_modular_42mm(*source.modular_42mm);
+    return result;
+}
+
 QString validate(const domain::BasicMessage &message)
 {
     return std::visit([](const auto &value) -> QString {
@@ -203,6 +237,15 @@ QString validate(const domain::BasicMessage &message)
             if ((value.current_heat && !std::isfinite(*value.current_heat))
                 || (value.last_projectile_fire_rate && !std::isfinite(*value.last_projectile_fire_rate)))
                 return QStringLiteral("机器人热量或射速不是有限数值。");
+        } else if constexpr (std::is_same_v<T, domain::RobotModuleData>) {
+            for (const auto field : {value.power_manager, value.rfid, value.light_strip,
+                    value.small_shooter, value.big_shooter, value.uwb, value.armor,
+                    value.video_transmission, value.capacitor, value.main_controller}) {
+                if (field && *field > 2)
+                    return QStringLiteral("模块状态必须为 0、1 或 2。");
+            }
+            if (value.modular_42mm && *value.modular_42mm > 1)
+                return QStringLiteral("42mm 安装权限必须为 0 或 1。");
         }
         return {};
     }, message);
@@ -240,6 +283,7 @@ DecodeResult decode(const QString &topic, const QByteArray &payload)
     if (topic == QLatin1String("GlobalLogisticsStatus")) return parse<wire::GlobalLogisticsStatus>(payload);
     if (topic == QLatin1String("RobotStaticStatus")) return parse<wire::RobotStaticStatus>(payload);
     if (topic == QLatin1String("RobotDynamicStatus")) return parse<wire::RobotDynamicStatus>(payload);
+    if (topic == QLatin1String("RobotModuleStatus")) return parse<wire::RobotModuleStatus>(payload);
     return {std::nullopt, QStringLiteral("未找到解析器。")};
 }
 
@@ -259,6 +303,7 @@ EncodeResult encode(const domain::BasicMessage &message)
         if constexpr (std::is_same_v<T, domain::LogisticsData>) topic = QStringLiteral("GlobalLogisticsStatus");
         if constexpr (std::is_same_v<T, domain::RobotStaticData>) topic = QStringLiteral("RobotStaticStatus");
         if constexpr (std::is_same_v<T, domain::RobotDynamicData>) topic = QStringLiteral("RobotDynamicStatus");
+        if constexpr (std::is_same_v<T, domain::RobotModuleData>) topic = QStringLiteral("RobotModuleStatus");
         return {topic, QByteArray(bytes.data(), static_cast<qsizetype>(bytes.size())), {}};
     }, message);
 }
